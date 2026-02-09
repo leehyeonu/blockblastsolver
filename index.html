@@ -357,7 +357,7 @@
             const canvas = document.getElementById('cv-canvas');
             const ctx = canvas.getContext('2d');
 
-            // Resize to standard width to make coordinate math consistent
+            // Standardize width for consistent processing
             const STANDARD_WIDTH = 500;
             const scale = STANDARD_WIDTH / img.width;
             canvas.width = STANDARD_WIDTH;
@@ -365,79 +365,148 @@
 
             ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
-            // 1. Detect Board
-            // Heuristic: Board is usually in the upper half, square-ish, standard padding
-            // We scan for the board area. 
-            // Simplifying Assumption: Board is centered horizontally, width is ~90% of screen
+            // 1. Detect Board Position Dynamically
+            // The board is the largest dark square area in the center.
+            // Scan vertical center line.
+            const midX = Math.floor(canvas.width / 2);
+            const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const pixelData = imgData.data;
 
+            let boardStartY = -1;
+            let boardEndY = -1;
+
+            // Find the board by looking for the dark grid background
+            // The app background is usually lighter (grey/purple) than the board (almost black)
+            // We look for a sequence of 10 dark pixels
+            for (let y = 50; y < canvas.height * 0.6; y++) {
+              const idx = (y * canvas.width + midX) * 4;
+              const r = pixelData[idx];
+              const g = pixelData[idx + 1];
+              const b = pixelData[idx + 2];
+
+              // Board background is usually very dark (RGB < 40)
+              if (r < 45 && g < 45 && b < 45) {
+                // Confirm it's the board by checking horizontal width
+                // Check 100 pixels to the left and right
+                let isWide = true;
+                const leftIdx = (y * canvas.width + (midX - 100)) * 4;
+                if (pixelData[leftIdx] > 50) isWide = false;
+
+                if (isWide) {
+                  if (boardStartY === -1) boardStartY = y;
+                }
+              } else {
+                if (boardStartY !== -1 && boardEndY === -1 && (y - boardStartY > 200)) {
+                  boardEndY = y;
+                }
+              }
+            }
+
+            // Fallback if detection fails
+            if (boardStartY === -1) boardStartY = canvas.height * 0.22;
+
+            // Board is square, so width ≈ height
+            // But usually there's padding. Let's assume standard width based on screen width
+            // Grid width is typically ~92% of screen width on mobile
             const boardWidth = canvas.width * 0.92;
-            const boardX = (canvas.width - boardWidth) / 2;
-            // Usually board starts around 20-25% down on mobile screenshots
-            // We can try to find the "start" by looking for the first row of distinct gray/colored cells
-            // For now, hardcode a safe guess or scan vertical center
-            let boardY = canvas.height * 0.22;
+            const boardHeight = boardWidth; // It's a square 8x8
 
+            // If we found start Y, center the X
+            const boardX = (canvas.width - boardWidth) / 2;
+
+            // Re-adjust start Y to include the border/padding if we hit the inner grid
+            // But usually simpler is better:
             const cellWidth = boardWidth / COLS;
-            const cellHeight = boardWidth / ROWS; // Square cells
+            const cellHeight = boardHeight / ROWS;
 
             const board = createBoard();
 
             // Scan the grid
             for (let r = 0; r < ROWS; r++) {
               for (let c = 0; c < COLS; c++) {
-                // Sample center of the cell
                 const cx = boardX + c * cellWidth + cellWidth / 2;
-                const cy = boardY + r * cellHeight + cellHeight / 2;
+                const cy = boardStartY + r * cellHeight + cellHeight / 2;
 
-                if (isBlockPresent(ctx, cx, cy, cellWidth / 4)) {
+                if (isBlockPresent(ctx, cx, cy, cellWidth / 5)) {
                   board[r][c] = 1;
                 }
               }
             }
 
             // 2. Detect Pieces (Bottom Area)
-            // Split bottom area into 3 zones
             const pieces = [];
-            const bottomAreaY = boardY + boardWidth + 20; // Just below board
-            const areaHeight = canvas.height - bottomAreaY;
+
+            // Pieces area starts below the board.
+            // IMPORTANT: There might be an Ad banner at the very bottom.
+            // We search in the space between boardEnd and correct "piece" horizon.
+            const piecesStartY = boardStartY + boardHeight + 10;
+            // Scan area height: roughly 30% of screen height remaining?
+            // Let's just define 3 vertical columns for the pieces
+
             const pieceZoneWidth = canvas.width / 3;
+            // The center Y for pieces. Usually centered in the remaining space or specific offset
+            // We will scan a vertical line in each zone to find the "top" of a piece
 
             for (let i = 0; i < 3; i++) {
               const zoneX = i * pieceZoneWidth;
-              // Scan a 5x5 grid in this zone
-              // We need to find the "center of mass" of the piece or just scan a virtual 5x5 grid
-              // Let's assume the piece is centered in the zone
-
-              // We construct a shape array
-              // The tricky part is knowing the cell size of the *pieces* (usually smaller than board)
-              // Let's guess piece cell size is ~60% of board cell size
-              const pCellSize = cellWidth * 0.6;
               const zoneCenterX = zoneX + pieceZoneWidth / 2;
-              const zoneCenterY = bottomAreaY + areaHeight / 2; // Rough center
 
-              // We scan a 5x5 grid relative to the zone center
-              // 5x5 means offsets: -2, -1, 0, 1, 2
+              // Search for the piece logic:
+              // Scan down from piecesStartY to find the first "colored" pixel
+              let pieceTopY = -1;
+              let pieceCenterY = piecesStartY + (cellHeight * 2.5); // Default guess
+
+              // Refined search for piece center
+              // Scan a vertical strip in the center of the zone
+              for (let scanY = piecesStartY; scanY < canvas.height - 10; scanY += 5) {
+                if (isBlockPresent(ctx, zoneCenterX, scanY, 2)) {
+                  pieceTopY = scanY;
+                  // Determine approximate center: Piece is usually 1-4 blocks tall.
+                  // Let's assume we hit the top block.
+                  // We'll scan a grid around this Y.
+                  pieceCenterY = scanY + cellHeight;
+                  break;
+                }
+              }
+
+              if (pieceTopY === -1) {
+                // No piece found in center trace? Try a bit wider? 
+                // Fallback to default position
+              }
+
+              // Use slightly smaller cell size for pieces
+              const pCellSize = cellWidth * 0.9; // Visual piece size is often close to board size on grid
+
+              // We scan a 5x5 grid. 
+              // We need to align the grid to the detected block.
+              // If we found a block at (zoneCenterX, pieceTopY), that is likely [0,something] or top row of the shape.
+              // Let's scan a larger area and bin it.
+
               const shape = Array(5).fill().map(() => Array(5).fill(0));
               let hasBlock = false;
 
+              // Anchor scanning around the estimated center
+              const anchorX = zoneCenterX;
+              const anchorY = pieceCenterY;
+
               for (let pr = -2; pr <= 2; pr++) {
                 for (let pc = -2; pc <= 2; pc++) {
-                  const px = zoneCenterX + pc * pCellSize;
-                  const py = zoneCenterY + pr * pCellSize;
+                  const px = anchorX + pc * pCellSize;
+                  const py = anchorY + pr * pCellSize;
 
-                  if (isBlockPresent(ctx, px, py, pCellSize / 4)) {
+                  if (isBlockPresent(ctx, px, py, pCellSize / 5)) {
                     shape[pr + 2][pc + 2] = 1;
                     hasBlock = true;
                   }
                 }
               }
 
-              // Normalize Shape: Trim empty rows/cols to minimal bounding box
               if (hasBlock) {
                 pieces.push({ shape: trimShape(shape) });
               } else {
-                // Fallback: If detection fails, give a 1x1 block
-                pieces.push({ shape: [[1]] });
+                // Try a Backup Scan for "Small" pieces that might have been missed by center trace (like a single dot offset)
+                // or just return empty for safety
+                pieces.push({ shape: [[1]] }); // Fallback to 1x1 to prevent crash
               }
             }
 
@@ -448,13 +517,11 @@
       }
 
       function isBlockPresent(ctx, x, y, radius) {
-        // Get pixel data around the point
-        const size = Math.floor(radius * 2);
-        // Safe bounds check
         if (x < 0 || y < 0 || x >= ctx.canvas.width || y >= ctx.canvas.height) return false;
 
         try {
-          const imgData = ctx.getImageData(x - radius, y - radius, size, size);
+          const size = Math.max(1, Math.floor(radius));
+          const imgData = ctx.getImageData(x - size, y - size, size * 2, size * 2);
           const data = imgData.data;
           let r = 0, g = 0, b = 0;
           let count = 0;
@@ -470,25 +537,32 @@
           g = Math.floor(g / count);
           b = Math.floor(b / count);
 
-          // Check 1: Saturation (Blocks are colorful, empty slots are greyish)
-          const hsl = rgbToHsl(r, g, b);
-          // Background is usually dark blue/grey (low saturation or very dark)
-          // Pieces are bright colors (Orange, Blue, Pink, Green)
+          // Block Logic:
+          // Empty slots: Dark Grey/Black (RGB ~30-40)
+          // Background: Grey/Purple (RGB ~100+)
+          // Blocks: Bright Colors (Red, Blue, Green, Orange, etc.)
 
-          // Tuned Thresholds for Block Blast
-          // Empty slot is usually very dark (L < 0.2) or grey (S < 0.1)
-          // Blocks are usually bright (L > 0.3) AND colorful (S > 0.3)
+          // If it's very dark, it's an empty slot
+          if (r < 60 && g < 60 && b < 60) return false;
 
-          // Light Blue blocks need special care. 
-          const isColorful = hsl.s > 0.25;
-          const isBright = hsl.l > 0.25;
+          // If it's reasonably bright, it's likely a block
+          // Note: The board background is dark. The app background is lighter.
+          // We need to differentiate "Empty Board Slot" vs "Filled Block".
+          // Since we only query points *inside* the board grid (for board), detecting "Dark" is sufficient for "Empty".
+          // For pieces, they are over the app background (Lighter).
 
-          // Specific check for the dark empty slots
-          // Empty slots on some versions are dark blue.
-          // We assume "Empty" is the dominant background color? 
-          // Simple heuristic: If it looks "on", return true.
+          // Saturation Check is good for pieces
+          const max = Math.max(r, g, b);
+          const min = Math.min(r, g, b);
+          const diff = max - min;
 
-          return isColorful && isBright;
+          // Greyscale check (low saturation)
+          if (diff < 15) return false; // It's grey/black/white -> likely background or empty slot
+
+          // Brightness check
+          if (max < 50) return false; // Too dark
+
+          return true;
         } catch (e) {
           return false;
         }
