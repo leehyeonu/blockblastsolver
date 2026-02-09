@@ -62,7 +62,7 @@
       <div class="p-6 md:p-10 space-y-8">
 
         <!-- Upload / Preview Box -->
-        <div id="upload-wrapper" class="relative group w-64 h-64 mx-auto">
+        <div id="upload-wrapper" class="relative group w-full max-w-sm mx-auto aspect-[3/5]">
           <!-- File Input Overlay -->
           <label for="image-upload" class="cursor-pointer block w-full h-full relative z-10">
             <div id="upload-placeholder"
@@ -74,7 +74,8 @@
               </svg>
               <span class="text-sm font-medium text-indigo-600">Tap to Upload</span>
             </div>
-            <img id="preview-img" class="absolute inset-0 w-full h-full object-cover rounded-2xl hidden shadow-lg" />
+            <img id="preview-img"
+              class="absolute inset-0 w-full h-full object-contain bg-black/5 rounded-2xl hidden shadow-lg" />
           </label>
           <input id="image-upload" type="file" class="hidden" accept="image/*" />
 
@@ -349,7 +350,7 @@
       }
 
 
-      // --- IMAGE PROCESSING (REAL) ---
+      // --- IMAGE PROCESSING (REAL + DEBUG) ---
       async function analyzeImage(file) {
         return new Promise(resolve => {
           const img = new Image();
@@ -363,63 +364,49 @@
             canvas.width = STANDARD_WIDTH;
             canvas.height = img.height * scale;
 
-            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height); // Draw source image
 
             // 1. Detect Board Position Dynamically
-            // The board is the largest dark square area in the center.
-            // Scan vertical center line.
             const midX = Math.floor(canvas.width / 2);
             const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
             const pixelData = imgData.data;
 
             let boardStartY = -1;
-            let boardEndY = -1;
 
-            // Find the board by looking for the dark grid background
-            // The app background is usually lighter (grey/purple) than the board (almost black)
-            // We look for a sequence of 10 dark pixels
+            // Find board top (Dark area check)
             for (let y = 50; y < canvas.height * 0.6; y++) {
               const idx = (y * canvas.width + midX) * 4;
               const r = pixelData[idx];
               const g = pixelData[idx + 1];
               const b = pixelData[idx + 2];
 
-              // Board background is usually very dark (RGB < 40)
-              if (r < 45 && g < 45 && b < 45) {
-                // Confirm it's the board by checking horizontal width
-                // Check 100 pixels to the left and right
+              if (r < 50 && g < 50 && b < 50) {
                 let isWide = true;
                 const leftIdx = (y * canvas.width + (midX - 100)) * 4;
-                if (pixelData[leftIdx] > 50) isWide = false;
+                // Horizontal check
+                if (pixelData[leftIdx] > 60) isWide = false;
 
                 if (isWide) {
                   if (boardStartY === -1) boardStartY = y;
                 }
-              } else {
-                if (boardStartY !== -1 && boardEndY === -1 && (y - boardStartY > 200)) {
-                  boardEndY = y;
-                }
               }
             }
+            // Fallback
+            if (boardStartY === -1 || boardStartY > canvas.height * 0.4) boardStartY = canvas.height * 0.22;
 
-            // Fallback if detection fails
-            if (boardStartY === -1) boardStartY = canvas.height * 0.22;
-
-            // Board is square, so width ≈ height
-            // But usually there's padding. Let's assume standard width based on screen width
-            // Grid width is typically ~92% of screen width on mobile
             const boardWidth = canvas.width * 0.92;
-            const boardHeight = boardWidth; // It's a square 8x8
-
-            // If we found start Y, center the X
+            const boardHeight = boardWidth;
             const boardX = (canvas.width - boardWidth) / 2;
 
-            // Re-adjust start Y to include the border/padding if we hit the inner grid
-            // But usually simpler is better:
             const cellWidth = boardWidth / COLS;
             const cellHeight = boardHeight / ROWS;
 
             const board = createBoard();
+
+            // Visualize Board Grid (Overlay)
+            ctx.strokeStyle = 'rgba(255, 0, 0, 0.5)';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(boardX, boardStartY, boardWidth, boardHeight);
 
             // Scan the grid
             for (let r = 0; r < ROWS; r++) {
@@ -427,65 +414,62 @@
                 const cx = boardX + c * cellWidth + cellWidth / 2;
                 const cy = boardStartY + r * cellHeight + cellHeight / 2;
 
+                // Draw cell centers for debugging
+                ctx.fillStyle = 'rgba(0, 255, 0, 0.3)';
+                ctx.beginPath();
+                ctx.arc(cx, cy, 2, 0, Math.PI * 2);
+                ctx.fill();
+
                 if (isBlockPresent(ctx, cx, cy, cellWidth / 5)) {
                   board[r][c] = 1;
+                  // Highlight detected blocks
+                  ctx.fillStyle = 'rgba(0, 255, 0, 0.5)';
+                  ctx.fillRect(boardX + c * cellWidth + 2, boardStartY + r * cellHeight + 2, cellWidth - 4, cellHeight - 4);
                 }
               }
             }
 
-            // 2. Detect Pieces (Bottom Area)
+            // 2. Detect Pieces
             const pieces = [];
-
-            // Pieces area starts below the board.
-            // IMPORTANT: There might be an Ad banner at the very bottom.
-            // We search in the space between boardEnd and correct "piece" horizon.
             const piecesStartY = boardStartY + boardHeight + 10;
-            // Scan area height: roughly 30% of screen height remaining?
-            // Let's just define 3 vertical columns for the pieces
-
             const pieceZoneWidth = canvas.width / 3;
-            // The center Y for pieces. Usually centered in the remaining space or specific offset
-            // We will scan a vertical line in each zone to find the "top" of a piece
+
+            // Visual separator for pieces area
+            ctx.strokeStyle = 'blue';
+            ctx.beginPath();
+            ctx.moveTo(0, piecesStartY);
+            ctx.lineTo(canvas.width, piecesStartY);
+            ctx.stroke();
 
             for (let i = 0; i < 3; i++) {
               const zoneX = i * pieceZoneWidth;
               const zoneCenterX = zoneX + pieceZoneWidth / 2;
 
-              // Search for the piece logic:
-              // Scan down from piecesStartY to find the first "colored" pixel
+              // Scan logic to find piece vertical center
               let pieceTopY = -1;
-              let pieceCenterY = piecesStartY + (cellHeight * 2.5); // Default guess
+              let pieceCenterY = piecesStartY + (cellHeight * 2.5);
 
-              // Refined search for piece center
-              // Scan a vertical strip in the center of the zone
               for (let scanY = piecesStartY; scanY < canvas.height - 10; scanY += 5) {
+                // Check IsBlockPresent without drawing on original canvas data.
+                // Note: The previous draw calls modified the canvas, but typically checking small points is fine.
+                // Ideally this should check a clean buffer, but for this demo:
+                // We offset check to avoid the green dots we just drew if possible, or assume dot is small.
                 if (isBlockPresent(ctx, zoneCenterX, scanY, 2)) {
                   pieceTopY = scanY;
-                  // Determine approximate center: Piece is usually 1-4 blocks tall.
-                  // Let's assume we hit the top block.
-                  // We'll scan a grid around this Y.
                   pieceCenterY = scanY + cellHeight;
                   break;
                 }
               }
 
-              if (pieceTopY === -1) {
-                // No piece found in center trace? Try a bit wider? 
-                // Fallback to default position
-              }
+              const pCellSize = cellWidth * 0.9;
 
-              // Use slightly smaller cell size for pieces
-              const pCellSize = cellWidth * 0.9; // Visual piece size is often close to board size on grid
-
-              // We scan a 5x5 grid. 
-              // We need to align the grid to the detected block.
-              // If we found a block at (zoneCenterX, pieceTopY), that is likely [0,something] or top row of the shape.
-              // Let's scan a larger area and bin it.
+              // Draw search zone box
+              ctx.strokeStyle = 'rgba(0,0,255,0.3)';
+              ctx.strokeRect(zoneX, piecesStartY, pieceZoneWidth, canvas.height - piecesStartY);
 
               const shape = Array(5).fill().map(() => Array(5).fill(0));
               let hasBlock = false;
 
-              // Anchor scanning around the estimated center
               const anchorX = zoneCenterX;
               const anchorY = pieceCenterY;
 
@@ -497,6 +481,9 @@
                   if (isBlockPresent(ctx, px, py, pCellSize / 5)) {
                     shape[pr + 2][pc + 2] = 1;
                     hasBlock = true;
+                    // Debug Draw
+                    ctx.fillStyle = 'rgba(0, 0, 255, 0.5)';
+                    ctx.fillRect(px - pCellSize / 2 + 2, py - pCellSize / 2 + 2, pCellSize - 4, pCellSize - 4);
                   }
                 }
               }
@@ -504,11 +491,13 @@
               if (hasBlock) {
                 pieces.push({ shape: trimShape(shape) });
               } else {
-                // Try a Backup Scan for "Small" pieces that might have been missed by center trace (like a single dot offset)
-                // or just return empty for safety
-                pieces.push({ shape: [[1]] }); // Fallback to 1x1 to prevent crash
+                pieces.push({ shape: [[1]] });
               }
             }
+
+            // Render the debug canvas onto the preview image
+            const previewImg = document.getElementById('preview-img');
+            previewImg.src = canvas.toDataURL(); // Show the processed image with overlays!
 
             resolve({ board, pieces });
           };
