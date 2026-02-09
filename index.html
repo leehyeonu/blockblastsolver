@@ -350,7 +350,7 @@
       }
 
 
-      // --- IMAGE PROCESSING (IMPROVED ACCURACY) ---
+      // --- IMAGE PROCESSING (V4: Grid Contrast Detection) ---
       async function analyzeImage(file) {
         return new Promise(resolve => {
           const img = new Image();
@@ -376,7 +376,6 @@
               return { r: pixelData[idx], g: pixelData[idx + 1], b: pixelData[idx + 2] };
             }
 
-            // Get average color in a small area
             function getAverageColor(x, y, radius) {
               let r = 0, g = 0, b = 0, count = 0;
               for (let dy = -radius; dy <= radius; dy++) {
@@ -388,30 +387,22 @@
               return { r: r / count, g: g / count, b: b / count };
             }
 
-            // Check if pixel is a game block (IMPROVED)
+            // Difference between two colors
+            function getColorDiff(c1, c2) {
+              return Math.abs(c1.r - c2.r) + Math.abs(c1.g - c2.g) + Math.abs(c1.b - c2.b);
+            }
+
             function isBlock(r, g, b) {
               const max = Math.max(r, g, b);
               const min = Math.min(r, g, b);
               const diff = max - min;
-
-              // Too dark = empty cell in dark theme
               if (max < 50) return false;
-
-              // High saturation means colorful block
               const sat = max === 0 ? 0 : diff / max;
-              if (sat > 0.20 && max > 70) return true;
-
-              // Also check for high brightness with some color variation
-              // This catches lighter colored blocks
-              if (diff > 30 && max > 100) return true;
-
-              return false;
+              // High saturation or very bright colorful block
+              return (sat > 0.20 && max > 70) || (diff > 30 && max > 100);
             }
 
-            // === STEP 1: FIND BOARD POSITION ===
-            // The score text is always above the board. Find it, then board is below.
-            // Board takes ~88% width, centered
-
+            // === STEP 1: FIND BOARD POSITION (GRID DETECT) ===
             const boardWidthRatio = 0.88;
             const boardWidth = canvas.width * boardWidthRatio;
             const boardX = (canvas.width - boardWidth) / 2;
@@ -419,157 +410,162 @@
             const cellHeight = cellWidth;
             const boardHeight = cellHeight * ROWS;
 
-            // Find where the dark/colored board area starts
-            // Scan from top, look for consistent row of similar color (board background or blocks)
-            let boardY = Math.floor(canvas.height * 0.12); // Default
+            let boardY = -1;
 
-            // Method: find first row where we detect blocks or dark cells
-            const midX = canvas.width / 2;
-            for (let y = 60; y < canvas.height * 0.25; y++) {
-              // Check if this row looks like board (either has blocks or is dark)
-              let boardLikeCount = 0;
-              for (let c = 0; c < COLS; c++) {
-                const x = boardX + c * cellWidth + cellWidth / 2;
-                const avg = getAverageColor(x, y, 3);
+            // Scan down to find the row where grid lines become visible
+            // We compare "Cell Center" vs "Grid Line (Cell Edge)"
+            for (let y = 60; y < canvas.height * 0.4; y += 2) {
+              let gridEvidence = 0;
 
-                // Check if it's a block OR dark empty cell
-                const isDark = avg.r < 60 && avg.g < 60 && avg.b < 60;
-                const isBlockCell = isBlock(avg.r, avg.g, avg.b);
+              for (let c = 0; c < COLS - 1; c++) {
+                const cellCenterX = boardX + c * cellWidth + cellWidth / 2;
+                const gridLineX = boardX + (c + 1) * cellWidth; // The line between cell c and c+1
 
-                if (isDark || isBlockCell) boardLikeCount++;
+                const colorCenter = getAverageColor(cellCenterX, y, 2);
+                const colorLine = getAverageColor(gridLineX, y, 2);
+
+                const diff = getColorDiff(colorCenter, colorLine);
+
+                // If there's a contrast between center and edge, it might be a grid
+                // OR if the center is a block (very colorful), that counts too
+                if (diff > 15 || isBlock(colorCenter.r, colorCenter.g, colorCenter.b)) {
+                  gridEvidence++;
+                }
               }
 
-              if (boardLikeCount >= 4) {
+              // If we see evidence across the row (e.g. > 3 columns show grid structure)
+              if (gridEvidence >= 4) {
+                // Double check: Is this just text? Text usually doesn't align with ALL columns.
+                // Scan a bit deeper to confirm it persists
                 boardY = y;
                 break;
               }
             }
 
+            // Fallback
+            if (boardY === -1) boardY = Math.floor(canvas.height * 0.15);
+
+            // Refine: We might have caught the middle of the first cell. 
+            // Better to snap to the detected edge or just trust the Y we found is roughly top.
+            // Actually, the grid lines usually start at the very top.
+            // Let's adjust slightly up if we hit a block immediately, but detection usually hits top edge first.
+            // Optimization: The border itself is usually a bit above the first internal grid line.
+            boardY -= 2;
+
             const boardBottom = boardY + boardHeight;
 
             // === DEBUG VISUALIZATION ===
-            ctx.strokeStyle = 'rgba(255, 0, 0, 0.9)';
-            ctx.lineWidth = 3;
+            ctx.strokeStyle = 'rgba(255, 0, 0, 1.0)';
+            ctx.lineWidth = 4;
             ctx.strokeRect(boardX, boardY, boardWidth, boardHeight);
 
-            ctx.strokeStyle = 'rgba(255, 255, 0, 0.4)';
+            // Draw grid lines
+            ctx.strokeStyle = 'rgba(255, 255, 0, 0.5)';
             ctx.lineWidth = 1;
-            for (let r = 0; r <= ROWS; r++) {
-              ctx.beginPath();
-              ctx.moveTo(boardX, boardY + r * cellHeight);
-              ctx.lineTo(boardX + boardWidth, boardY + r * cellHeight);
-              ctx.stroke();
+            for (let i = 0; i <= ROWS; i++) {
+              let y = boardY + i * cellHeight;
+              ctx.beginPath(); ctx.moveTo(boardX, y); ctx.lineTo(boardX + boardWidth, y); ctx.stroke();
             }
-            for (let c = 0; c <= COLS; c++) {
-              ctx.beginPath();
-              ctx.moveTo(boardX + c * cellWidth, boardY);
-              ctx.lineTo(boardX + c * cellWidth, boardY + boardHeight);
-              ctx.stroke();
+            for (let i = 0; i <= COLS; i++) {
+              let x = boardX + i * cellWidth;
+              ctx.beginPath(); ctx.moveTo(x, boardY); ctx.lineTo(x, boardY + boardHeight); ctx.stroke();
             }
+
 
             // === STEP 2: DETECT BOARD BLOCKS ===
             const board = createBoard();
-
             for (let r = 0; r < ROWS; r++) {
               for (let c = 0; c < COLS; c++) {
                 const cx = boardX + c * cellWidth + cellWidth / 2;
                 const cy = boardY + r * cellHeight + cellHeight / 2;
 
-                // Sample center and nearby points
-                const rad = cellWidth * 0.25;
-                let blockVotes = 0;
+                // Sample center
+                const avg = getAverageColor(cx, cy, 4);
 
-                const testPoints = [
-                  [cx, cy],
-                  [cx - rad, cy],
-                  [cx + rad, cy],
-                  [cx, cy - rad],
-                  [cx, cy + rad]
-                ];
-
-                for (const [tx, ty] of testPoints) {
-                  const avg = getAverageColor(tx, ty, 2);
-                  if (isBlock(avg.r, avg.g, avg.b)) blockVotes++;
-                }
-
-                if (blockVotes >= 2) {
+                // Also sample corners to avoid missing blocks
+                // If center is block, it's a block.
+                if (isBlock(avg.r, avg.g, avg.b)) {
                   board[r][c] = 1;
-                  ctx.fillStyle = 'rgba(0, 255, 0, 0.35)';
-                  ctx.fillRect(boardX + c * cellWidth + 2, boardY + r * cellHeight + 2, cellWidth - 4, cellHeight - 4);
+                  ctx.fillStyle = 'rgba(0, 255, 0, 0.5)';
+                  ctx.fillRect(boardX + c * cellWidth + 4, boardY + r * cellHeight + 4, cellWidth - 8, cellHeight - 8);
                 }
               }
             }
 
-            // === STEP 3: DETECT PIECES (IMPROVED) ===
+            // === STEP 3: DETECT PIECES ===
             const pieces = [];
-            const piecesStartY = boardBottom + 5;
-            const piecesEndY = canvas.height - 35;
+            const piecesStartY = boardBottom + 10;
+            const piecesEndY = canvas.height - 30;
+            const pieceScanHeight = piecesEndY - piecesStartY;
             const pieceZoneWidth = canvas.width / 3;
 
-            ctx.strokeStyle = 'rgba(0, 100, 255, 0.9)';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.moveTo(0, piecesStartY);
-            ctx.lineTo(canvas.width, piecesStartY);
-            ctx.stroke();
+            // Debug line
+            ctx.strokeStyle = 'blue';
+            ctx.beginPath(); ctx.moveTo(0, piecesStartY); ctx.lineTo(canvas.width, piecesStartY); ctx.stroke();
 
             for (let i = 0; i < 3; i++) {
               const zoneX = i * pieceZoneWidth;
-              const zoneCenterX = zoneX + pieceZoneWidth / 2;
+              // Detect bounding box of "stuff" in this zone
+              let minX = 9999, maxX = -1, minY = 9999, maxY = -1;
+              let hasPixels = false;
 
-              // IMPROVED: Scan entire zone for block pixels, not just center line
-              let minPieceY = Infinity, maxPieceY = -1;
-              let minPieceX = Infinity, maxPieceX = -1;
-
-              // Scan the zone for blocks
-              for (let sy = piecesStartY + 5; sy < piecesEndY; sy += 4) {
-                for (let sx = zoneX + 10; sx < zoneX + pieceZoneWidth - 10; sx += 4) {
-                  const avg = getAverageColor(sx, sy, 2);
-                  if (isBlock(avg.r, avg.g, avg.b)) {
-                    if (sy < minPieceY) minPieceY = sy;
-                    if (sy > maxPieceY) maxPieceY = sy;
-                    if (sx < minPieceX) minPieceX = sx;
-                    if (sx > maxPieceX) maxPieceX = sx;
+              for (let y = piecesStartY; y < piecesEndY; y += 4) {
+                for (let x = zoneX + 5; x < zoneX + pieceZoneWidth - 5; x += 4) {
+                  const p = getPixel(x, y);
+                  if (isBlock(p.r, p.g, p.b)) {
+                    if (x < minX) minX = x;
+                    if (x > maxX) maxX = x;
+                    if (y < minY) minY = y;
+                    if (y > maxY) maxY = y;
+                    hasPixels = true;
                   }
                 }
               }
 
-              ctx.strokeStyle = 'rgba(0, 0, 255, 0.3)';
-              ctx.strokeRect(zoneX + 2, piecesStartY + 2, pieceZoneWidth - 4, piecesEndY - piecesStartY - 4);
+              // Debug BBox
+              if (hasPixels) {
+                ctx.strokeStyle = 'cyan';
+                ctx.strokeRect(minX, minY, maxX - minX, maxY - minY);
 
-              // Calculate piece dimensions based on found bounds
-              const shape = Array(5).fill().map(() => Array(5).fill(0));
-              let hasBlock = false;
+                // Map to shape
+                // We assume pieces are aligned to a relative grid inside their bounding box.
+                // Typical cell size is smaller than board cell size.
+                const pCellSize = cellWidth * 0.6; // Guess
+                const width = maxX - minX;
+                const height = maxY - minY;
 
-              if (minPieceY < Infinity) {
-                // Found piece bounds, now sample on a grid
-                const pieceCenterX = (minPieceX + maxPieceX) / 2;
-                const pieceCenterY = (minPieceY + maxPieceY) / 2;
-                const pCellSize = cellWidth * 0.50;
+                // Estimate grid dimensions from pixel cloud size
+                // A single block is ~pCellSize
+                // 2 blocks is ~pCellSize * 2
+                const estimatedCols = Math.round(width / pCellSize) || 1;
+                const estimatedRows = Math.round(height / pCellSize) || 1;
+
+                // construct shape
+                // We scan grid points relative to the center of the detected bbox
+                const centerX = (minX + maxX) / 2;
+                const centerY = (minY + maxY) / 2;
+
+                // Create a 5x5 grid centered on the detected mass
+                const shape = Array(5).fill().map(() => Array(5).fill(0));
 
                 for (let pr = -2; pr <= 2; pr++) {
                   for (let pc = -2; pc <= 2; pc++) {
-                    const px = pieceCenterX + pc * pCellSize;
-                    const py = pieceCenterY + pr * pCellSize;
+                    // Sampling point
+                    const sx = centerX + pc * pCellSize;
+                    const sy = centerY + pr * pCellSize;
 
-                    if (py > piecesEndY || py < piecesStartY) continue;
-                    if (px < zoneX + 5 || px > zoneX + pieceZoneWidth - 5) continue;
-
-                    const avg = getAverageColor(px, py, 3);
-                    if (isBlock(avg.r, avg.g, avg.b)) {
+                    // Verify it's inside the detected bounds (with some margin)
+                    if (isBlock(getAverageColor(sx, sy, 2).r, getAverageColor(sx, sy, 2).g, getAverageColor(sx, sy, 2).b)) {
                       shape[pr + 2][pc + 2] = 1;
-                      hasBlock = true;
-                      ctx.fillStyle = 'rgba(0, 100, 255, 0.5)';
-                      ctx.fillRect(px - pCellSize / 2 + 1, py - pCellSize / 2 + 1, pCellSize - 2, pCellSize - 2);
+                      ctx.fillStyle = 'blue';
+                      ctx.fillRect(sx - 2, sy - 2, 4, 4);
                     }
                   }
                 }
-              }
-
-              if (hasBlock) {
                 pieces.push({ shape: trimShape(shape) });
+
               } else {
-                pieces.push({ shape: [[1]] });
+                pieces.push({ shape: [[1]] }); // Empty/Failed
               }
             }
 
