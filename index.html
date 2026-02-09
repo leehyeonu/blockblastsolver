@@ -350,7 +350,7 @@
       }
 
 
-      // --- IMAGE PROCESSING (V4: Grid Contrast Detection) ---
+      // --- IMAGE PROCESSING (V5: Edge Projection & Structure Analysis) ---
       async function analyzeImage(file) {
         return new Promise(resolve => {
           const img = new Image();
@@ -358,217 +358,276 @@
             const canvas = document.getElementById('cv-canvas');
             const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
-            const STANDARD_WIDTH = 500;
+            // 1. Setup Canvas
+            const STANDARD_WIDTH = 400; // Smaller width for faster processing
             const scale = STANDARD_WIDTH / img.width;
             canvas.width = STANDARD_WIDTH;
             canvas.height = img.height * scale;
-
             ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
-            const fullImgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            const pixelData = fullImgData.data;
+            const width = canvas.width;
+            const height = canvas.height;
+            const imgData = ctx.getImageData(0, 0, width, height);
+            const pixels = imgData.data;
+
+            // Helper: Grayscale intensity
+            function getGray(x, y) {
+              const i = (y * width + x) * 4;
+              return (pixels[i] + pixels[i + 1] + pixels[i + 2]) / 3;
+            }
 
             function getPixel(x, y) {
-              x = Math.floor(x);
-              y = Math.floor(y);
-              if (x < 0 || y < 0 || x >= canvas.width || y >= canvas.height) return { r: 128, g: 128, b: 128 };
-              const idx = (y * canvas.width + x) * 4;
-              return { r: pixelData[idx], g: pixelData[idx + 1], b: pixelData[idx + 2] };
+              const i = (y * width + x) * 4;
+              return { r: pixels[i], g: pixels[i + 1], b: pixels[i + 2] };
             }
 
-            function getAverageColor(x, y, radius) {
-              let r = 0, g = 0, b = 0, count = 0;
-              for (let dy = -radius; dy <= radius; dy++) {
-                for (let dx = -radius; dx <= radius; dx++) {
-                  const p = getPixel(x + dx, y + dy);
-                  r += p.r; g += p.g; b += p.b; count++;
+            // === STEP 1: FIND BOARD BY EDGE PROJECTION (STRUCTURAL ANALYSIS) ===
+            // Calculate vertical edge strength (changes in semi-horizontal direction)
+            // and horizontal edge strength (changes in vertical direction)
+
+            const vEdgeProfile = new Float32Array(width).fill(0);
+            const hEdgeProfile = new Float32Array(height).fill(0);
+
+            // Limited scan area for finding board (ignore top/bottom UI extremes)
+            const scanTop = Math.floor(height * 0.1);
+            const scanBottom = Math.floor(height * 0.5);
+            const scanLeft = Math.floor(width * 0.05);
+            const scanRight = Math.floor(width * 0.95);
+
+            // Compute Horizontal Projection (Sum of Vertical Edges along Y axis) - finds rows
+            // Compute Vertical Projection (Sum of Horizontal Edges along X axis) - finds cols
+
+            for (let y = scanTop; y < scanBottom; y++) {
+              for (let x = scanLeft; x < scanRight; x++) {
+                const center = getGray(x, y);
+                const right = getGray(x + 1, y);
+                const down = getGray(x, y + 1);
+
+                const hDiff = Math.abs(center - right); // Vertical line evidence
+                const vDiff = Math.abs(center - down);  // Horizontal line evidence
+
+                // Noise threshold
+                if (hDiff > 10) vEdgeProfile[x] += hDiff;
+                if (vDiff > 10) hEdgeProfile[y] += vDiff;
+              }
+            }
+
+            // --- Find Horizontal Range (X-axis) ---
+            // The board has strong vertical lines at left and right edges.
+            // Find the widest meaningful peaks.
+            let boardLeft = -1, boardRight = -1;
+
+            // Simple thresholding for peaks
+            const vMax = Math.max(...vEdgeProfile);
+            const vThresh = vMax * 0.4;
+
+            // Find first and last strong peak
+            for (let x = scanLeft; x < width / 2; x++) {
+              if (vEdgeProfile[x] > vThresh) { boardLeft = x; break; }
+            }
+            for (let x = scanRight; x > width / 2; x--) {
+              if (vEdgeProfile[x] > vThresh) { boardRight = x; break; }
+            }
+
+            // Fallback if detection fails
+            if (boardLeft === -1 || boardRight === -1 || (boardRight - boardLeft) < width * 0.7) {
+              // Use fixed layout assumption
+              boardLeft = Math.floor(width * 0.06);
+              boardRight = Math.floor(width * 0.94);
+            }
+
+            const boardWidth = boardRight - boardLeft;
+            const cellWidth = boardWidth / 8;
+
+            // --- Find Vertical Range (Y-axis) ---
+            // Determine Board Top. We know it's 8x8 square.
+            // Look for the first strong horizontal line peak.
+
+            let boardTop = -1;
+            const hMax = Math.max(...hEdgeProfile);
+            const hThresh = hMax * 0.3;
+
+            // Scan for the top grid line
+            // We expect multiple periodic peaks.
+            for (let y = scanTop; y < scanBottom; y++) {
+              // Check if this row is a peak
+              if (hEdgeProfile[y] > hThresh) {
+                // Verify consistency: is there another line ~cellWidth pixels down?
+                const nextLineY = Math.floor(y + cellWidth);
+                // Check window around expected next line
+                let foundNext = false;
+                for (let searchY = nextLineY - 5; searchY <= nextLineY + 5; searchY++) {
+                  if (hEdgeProfile[searchY] > hThresh * 0.5) foundNext = true;
+                }
+
+                if (foundNext) {
+                  boardTop = y;
+                  break;
                 }
               }
-              return { r: r / count, g: g / count, b: b / count };
             }
 
-            // Difference between two colors
-            function getColorDiff(c1, c2) {
-              return Math.abs(c1.r - c2.r) + Math.abs(c1.g - c2.g) + Math.abs(c1.b - c2.b);
-            }
+            if (boardTop === -1) boardTop = Math.floor(height * 0.15); // Fallback
 
-            function isBlock(r, g, b) {
-              const max = Math.max(r, g, b);
-              const min = Math.min(r, g, b);
-              const diff = max - min;
-              if (max < 50) return false;
-              const sat = max === 0 ? 0 : diff / max;
-              // High saturation or very bright colorful block
-              return (sat > 0.20 && max > 70) || (diff > 30 && max > 100);
-            }
+            // Adjust top: The edge detection usually finds the *start* of the contrast.
+            // Just ensure we cover the area.
+            const boardHeight = boardWidth; // It's square
+            const boardBottom = boardTop + boardHeight;
 
-            // === STEP 1: FIND BOARD POSITION (GRID DETECT) ===
-            const boardWidthRatio = 0.88;
-            const boardWidth = canvas.width * boardWidthRatio;
-            const boardX = (canvas.width - boardWidth) / 2;
-            const cellWidth = boardWidth / COLS;
-            const cellHeight = cellWidth;
-            const boardHeight = cellHeight * ROWS;
+            // Debug Overlay 1: Board Boundary
+            ctx.strokeStyle = 'rgba(255, 0, 0, 1)';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(boardLeft, boardTop, boardWidth, boardHeight);
 
-            let boardY = -1;
-
-            // Scan down to find the row where grid lines become visible
-            // We compare "Cell Center" vs "Grid Line (Cell Edge)"
-            for (let y = 60; y < canvas.height * 0.4; y += 2) {
-              let gridEvidence = 0;
-
-              for (let c = 0; c < COLS - 1; c++) {
-                const cellCenterX = boardX + c * cellWidth + cellWidth / 2;
-                const gridLineX = boardX + (c + 1) * cellWidth; // The line between cell c and c+1
-
-                const colorCenter = getAverageColor(cellCenterX, y, 2);
-                const colorLine = getAverageColor(gridLineX, y, 2);
-
-                const diff = getColorDiff(colorCenter, colorLine);
-
-                // If there's a contrast between center and edge, it might be a grid
-                // OR if the center is a block (very colorful), that counts too
-                if (diff > 15 || isBlock(colorCenter.r, colorCenter.g, colorCenter.b)) {
-                  gridEvidence++;
-                }
-              }
-
-              // If we see evidence across the row (e.g. > 3 columns show grid structure)
-              if (gridEvidence >= 4) {
-                // Double check: Is this just text? Text usually doesn't align with ALL columns.
-                // Scan a bit deeper to confirm it persists
-                boardY = y;
-                break;
-              }
-            }
-
-            // Fallback
-            if (boardY === -1) boardY = Math.floor(canvas.height * 0.15);
-
-            // Refine: We might have caught the middle of the first cell. 
-            // Better to snap to the detected edge or just trust the Y we found is roughly top.
-            // Actually, the grid lines usually start at the very top.
-            // Let's adjust slightly up if we hit a block immediately, but detection usually hits top edge first.
-            // Optimization: The border itself is usually a bit above the first internal grid line.
-            boardY -= 2;
-
-            const boardBottom = boardY + boardHeight;
-
-            // === DEBUG VISUALIZATION ===
-            ctx.strokeStyle = 'rgba(255, 0, 0, 1.0)';
-            ctx.lineWidth = 4;
-            ctx.strokeRect(boardX, boardY, boardWidth, boardHeight);
-
-            // Draw grid lines
-            ctx.strokeStyle = 'rgba(255, 255, 0, 0.5)';
-            ctx.lineWidth = 1;
-            for (let i = 0; i <= ROWS; i++) {
-              let y = boardY + i * cellHeight;
-              ctx.beginPath(); ctx.moveTo(boardX, y); ctx.lineTo(boardX + boardWidth, y); ctx.stroke();
-            }
-            for (let i = 0; i <= COLS; i++) {
-              let x = boardX + i * cellWidth;
-              ctx.beginPath(); ctx.moveTo(x, boardY); ctx.lineTo(x, boardY + boardHeight); ctx.stroke();
-            }
-
-
-            // === STEP 2: DETECT BOARD BLOCKS ===
+            // === STEP 2: RECOGNIZE BOARD CONTENT ===
             const board = createBoard();
-            for (let r = 0; r < ROWS; r++) {
-              for (let c = 0; c < COLS; c++) {
-                const cx = boardX + c * cellWidth + cellWidth / 2;
-                const cy = boardY + r * cellHeight + cellHeight / 2;
+            const cellH = boardHeight / 8;
+            const cellW = boardWidth / 8;
 
-                // Sample center
-                const avg = getAverageColor(cx, cy, 4);
+            for (let r = 0; r < 8; r++) {
+              for (let c = 0; c < 8; c++) {
+                const cx = boardLeft + c * cellW + cellW * 0.5;
+                const cy = boardTop + r * cellH + cellH * 0.5;
 
-                // Also sample corners to avoid missing blocks
-                // If center is block, it's a block.
-                if (isBlock(avg.r, avg.g, avg.b)) {
+                // Sample 5 points (Center + Corners)
+                const offset = cellW * 0.25;
+                const pts = [
+                  { x: cx, y: cy },
+                  { x: cx - offset, y: cy },
+                  { x: cx + offset, y: cy },
+                  { x: cx, y: cy - offset },
+                  { x: cx, y: cy + offset }
+                ];
+
+                let blockScore = 0;
+                for (const pt of pts) {
+                  const px = getPixel(pt.x, pt.y);
+                  // Colorfulness metric: difference between max and min channel
+                  const min = Math.min(px.r, px.g, px.b);
+                  const max = Math.max(px.r, px.g, px.b);
+                  const diff = max - min;
+                  const sat = max === 0 ? 0 : diff / max;
+
+                  // Is it a block?
+                  // 1. High saturation (Colorful block)
+                  if (sat > 0.15 && max > 60) blockScore++;
+                  // 2. Or very bright difference from typical dark background (Light block on dark theme)
+                  else if (diff > 25 && max > 90) blockScore++;
+                }
+
+                if (blockScore >= 2) {
                   board[r][c] = 1;
-                  ctx.fillStyle = 'rgba(0, 255, 0, 0.5)';
-                  ctx.fillRect(boardX + c * cellWidth + 4, boardY + r * cellHeight + 4, cellWidth - 8, cellHeight - 8);
+                  // Debug filled cell
+                  ctx.fillStyle = 'rgba(0, 255, 0, 0.4)';
+                  ctx.fillRect(boardLeft + c * cellW + 2, boardTop + r * cellH + 2, cellW - 4, cellH - 4);
                 }
               }
             }
 
-            // === STEP 3: DETECT PIECES ===
+            // === STEP 3: PIECE RECOGNITION (CENTER OF MASS) ===
             const pieces = [];
-            const piecesStartY = boardBottom + 10;
-            const piecesEndY = canvas.height - 30;
-            const pieceScanHeight = piecesEndY - piecesStartY;
-            const pieceZoneWidth = canvas.width / 3;
 
-            // Debug line
-            ctx.strokeStyle = 'blue';
-            ctx.beginPath(); ctx.moveTo(0, piecesStartY); ctx.lineTo(canvas.width, piecesStartY); ctx.stroke();
+            const piecesZoneTop = boardBottom + 10;
+            const piecesZoneH = height - piecesZoneTop - 10;
+            const zoneW = width / 3;
+
+            // Draw analysis zones
+            ctx.strokeStyle = 'cyan';
+            ctx.beginPath();
+            ctx.moveTo(0, piecesZoneTop); ctx.lineTo(width, piecesZoneTop);
+            ctx.stroke();
+
+            // Background Estimation for Piece Zone
+            // Sample a few points to determine background color
+            const bgSamples = [];
+            for (let i = 0; i < 5; i++) bgSamples.push(getPixel(width / 2, piecesZoneTop + piecesZoneH / 2 + (i - 2) * 10));
+            // Simple average
+            const bgR = bgSamples.reduce((s, p) => s + p.r, 0) / 5;
+            const bgG = bgSamples.reduce((s, p) => s + p.g, 0) / 5;
+            const bgB = bgSamples.reduce((s, p) => s + p.b, 0) / 5;
 
             for (let i = 0; i < 3; i++) {
-              const zoneX = i * pieceZoneWidth;
-              // Detect bounding box of "stuff" in this zone
-              let minX = 9999, maxX = -1, minY = 9999, maxY = -1;
-              let hasPixels = false;
+              const zx = i * zoneW;
+              const zy = piecesZoneTop;
 
-              for (let y = piecesStartY; y < piecesEndY; y += 4) {
-                for (let x = zoneX + 5; x < zoneX + pieceZoneWidth - 5; x += 4) {
-                  const p = getPixel(x, y);
-                  if (isBlock(p.r, p.g, p.b)) {
+              // 3.1 Identify Foreground Pixels
+              const fgPixels = [];
+              let minX = width, maxX = 0, minY = height, maxY = 0;
+
+              for (let y = zy; y < zy + piecesZoneH; y += 2) {
+                for (let x = zx + 5; x < zx + zoneW - 5; x += 2) {
+                  const px = getPixel(x, y);
+                  // Distance from background
+                  const dist = Math.abs(px.r - bgR) + Math.abs(px.g - bgG) + Math.abs(px.b - bgB);
+
+                  // Threshold for being "something else" (a piece)
+                  // Also insure it has some color or brightness
+                  if (dist > 40) {
+                    fgPixels.push({ x, y });
                     if (x < minX) minX = x;
                     if (x > maxX) maxX = x;
                     if (y < minY) minY = y;
                     if (y > maxY) maxY = y;
-                    hasPixels = true;
                   }
                 }
               }
 
-              // Debug BBox
-              if (hasPixels) {
-                ctx.strokeStyle = 'cyan';
+              // Debug Box
+              if (fgPixels.length > 50) { // Noise filter
+                ctx.strokeStyle = 'yellow';
                 ctx.strokeRect(minX, minY, maxX - minX, maxY - minY);
 
-                // Map to shape
-                // We assume pieces are aligned to a relative grid inside their bounding box.
-                // Typical cell size is smaller than board cell size.
-                const pCellSize = cellWidth * 0.6; // Guess
-                const width = maxX - minX;
-                const height = maxY - minY;
+                // 3.2 Determine Center of Mass
+                let sumX = 0, sumY = 0;
+                for (const p of fgPixels) { sumX += p.x; sumY += p.y; }
+                const cx = sumX / fgPixels.length;
+                const cy = sumY / fgPixels.length;
 
-                // Estimate grid dimensions from pixel cloud size
-                // A single block is ~pCellSize
-                // 2 blocks is ~pCellSize * 2
-                const estimatedCols = Math.round(width / pCellSize) || 1;
-                const estimatedRows = Math.round(height / pCellSize) || 1;
+                // Draw Center
+                ctx.fillStyle = 'red';
+                ctx.fillRect(cx - 2, cy - 2, 4, 4);
 
-                // construct shape
-                // We scan grid points relative to the center of the detected bbox
-                const centerX = (minX + maxX) / 2;
-                const centerY = (minY + maxY) / 2;
+                // 3.3 Grid Mapping
+                // Estimate cell size. Piece cells are usually smaller than board cells.
+                // ~60% of board cell width is a good heuristic constant
+                const pCellW = cellW * 0.6;
 
-                // Create a 5x5 grid centered on the detected mass
                 const shape = Array(5).fill().map(() => Array(5).fill(0));
+                let hasBlock = false;
 
-                for (let pr = -2; pr <= 2; pr++) {
-                  for (let pc = -2; pc <= 2; pc++) {
-                    // Sampling point
-                    const sx = centerX + pc * pCellSize;
-                    const sy = centerY + pr * pCellSize;
+                for (let r = -2; r <= 2; r++) {
+                  for (let c = -2; c <= 2; c++) {
+                    // Target pixel for this grid cell
+                    const tx = Math.floor(cx + c * pCellW);
+                    const ty = Math.floor(cy + r * pCellW);
 
-                    // Verify it's inside the detected bounds (with some margin)
-                    if (isBlock(getAverageColor(sx, sy, 2).r, getAverageColor(sx, sy, 2).g, getAverageColor(sx, sy, 2).b)) {
-                      shape[pr + 2][pc + 2] = 1;
+                    // Check if this point is in our foreground set (or close to one)
+                    // We do a small radius check
+                    let isHit = false;
+
+                    // Optimization: Just check pixel color directly instead of searching fgPixels
+                    if (tx >= 0 && tx < width && ty >= 0 && ty < height) {
+                      const px = getPixel(tx, ty);
+                      const dist = Math.abs(px.r - bgR) + Math.abs(px.g - bgG) + Math.abs(px.b - bgB);
+                      if (dist > 40) isHit = true;
+                    }
+
+                    if (isHit) {
+                      shape[r + 2][c + 2] = 1;
+                      hasBlock = true;
                       ctx.fillStyle = 'blue';
-                      ctx.fillRect(sx - 2, sy - 2, 4, 4);
+                      ctx.fillRect(tx - 2, ty - 2, 4, 4);
                     }
                   }
                 }
-                pieces.push({ shape: trimShape(shape) });
 
+                pieces.push({ shape: trimShape(shape) });
               } else {
-                pieces.push({ shape: [[1]] }); // Empty/Failed
+                pieces.push({ shape: [[1]] }); // No piece found
               }
             }
 
+            // Update preview
             const previewImg = document.getElementById('preview-img');
             previewImg.src = canvas.toDataURL();
 
