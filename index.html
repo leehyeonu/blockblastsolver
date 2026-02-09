@@ -350,7 +350,7 @@
       }
 
 
-      // --- IMAGE PROCESSING (V7: Grid Frequency Locking) ---
+      // --- IMAGE PROCESSING (V9: strictly Local Grid Verify) ---
       async function analyzeImage(file) {
         return new Promise(resolve => {
           const img = new Image();
@@ -382,27 +382,25 @@
 
             function isColorPixel(x, y, bgR, bgG, bgB) {
               const p = getPixel(x, y);
-              // Simple Euclidianish distance
               const dist = Math.abs(p.r - bgR) + Math.abs(p.g - bgG) + Math.abs(p.b - bgB);
               return dist > 40;
             }
 
-            // === STEP 1: ROBUST BOARD DETECTION (GRID FREQUENCY LOCK) ===
+            // === STEP 1: ROBUST BOARD DETECTION (STRICT LOCAL VERIFY) ===
 
-            // 1. Determine Board Width (Horizontal Scan)
-            // The board usually has distinct vertical edges on Left and Right.
+            // 1. Determine Board Width (Global Vertical Profile)
+            // The LEFT and RIGHT boundaries are usually very clear across the whole image.
             const vEdgeProfile = new Float32Array(width).fill(0);
             const scanTop = Math.floor(height * 0.15);
             const scanBottom = Math.floor(height * 0.5);
 
             for (let y = scanTop; y < scanBottom; y += 2) {
               for (let x = 10; x < width - 10; x++) {
-                const diff = Math.abs(getGray(x - 1, y) - getGray(x + 1, y)); // Horizontal gradient
+                const diff = Math.abs(getGray(x - 1, y) - getGray(x + 1, y));
                 if (diff > 15) vEdgeProfile[x] += diff;
               }
             }
 
-            // Find Board Left/Right by looking for outermost strong peaks
             let boardLeft = 0, boardRight = width;
             const vMax = Math.max(...vEdgeProfile);
             const vThresh = vMax * 0.3;
@@ -414,65 +412,87 @@
               if (vEdgeProfile[x] > vThresh) { boardRight = x; break; }
             }
 
-            // Safety Check
             if ((boardRight - boardLeft) < width * 0.6) {
               boardLeft = Math.floor(width * 0.06);
               boardRight = Math.floor(width * 0.94);
             }
 
             const boardWidth = boardRight - boardLeft;
-            const estimatedCellH = boardWidth / 8; // Square cells
+            const estimatedCellW = boardWidth / 8;
 
-            // 2. Determine Board Top/Bottom (Frequency Locking)
-            // We search for a pattern of 9 horizontal lines spaced by `estimatedCellH`.
+            // 2. Find Board Top (Strict Local Grid Check)
+            // Instead of pre-calculating horizontal edges globally, we scan each candidate Y.
 
-            const hEdgeProfile = new Float32Array(height).fill(0);
-
-            // Focus scan on the horizontal center of the board to catch grid lines
-            const centerX = boardLeft + boardWidth / 2;
-            const scanWidth = boardWidth * 0.6; // center 60%
-
-            for (let y = 10; y < height - 10; y++) {
-              let sum = 0;
-              for (let x = centerX - scanWidth / 2; x < centerX + scanWidth / 2; x += 2) {
-                const diff = Math.abs(getGray(x, y) - getGray(x, y + 2)); // Vertical gradient
-                sum += diff;
-              }
-              hEdgeProfile[y] = sum;
-            }
-
-            // Sliding Window Score
-            // We want to find `startY` such that sum of edges at (startY + i * cellH) is maximized.
             let bestScore = -1;
             let bestTopY = -1;
 
-            // Search range for TopY: 10% to 40% of screen height
-            const searchStart = Math.floor(height * 0.1);
-            const searchEnd = Math.floor(height * 0.4);
+            const searchStart = Math.floor(height * 0.15); // Don't start too high (avoid score)
+            const searchEnd = Math.floor(height * 0.45);
+
+            // Pre-compute horizontal line "presence" to speed up
+            // hLineScore[y] = how strong is the horizontal edge at y?
+            const hLineScore = new Float32Array(height).fill(0);
+            const midX = Math.floor(boardLeft + boardWidth / 2);
+            for (let y = 10; y < height - 10; y++) {
+              let s = 0;
+              // Sample center 50%
+              for (let x = midX - boardWidth * 0.25; x < midX + boardWidth * 0.25; x += 2) {
+                s += Math.abs(getGray(x, y) - getGray(x, y + 2));
+              }
+              hLineScore[y] = s;
+            }
 
             for (let y = searchStart; y < searchEnd; y++) {
-              let score = 0;
-              // Check 9 lines (0 to 8)
+              // Heuristic 1: 9 Horizontal Lines
+              // Check if we have horizontal lines at correct intervals
+              let hGridScore = 0;
               for (let i = 0; i <= 8; i++) {
-                const targetY = Math.floor(y + i * estimatedCellH);
-                if (targetY >= height) break;
-
-                // Sum local edge strength (window of +/- 2 pixels to account for scale errors)
-                let signal = 0;
-                for (let k = -2; k <= 2; k++) signal += hEdgeProfile[targetY + k] || 0;
-                score += signal;
+                const ty = Math.floor(y + i * estimatedCellW);
+                if (ty >= height) break;
+                // Check local max in +/- 2px window
+                let localMax = 0;
+                for (let k = -2; k <= 2; k++) localMax = Math.max(localMax, hLineScore[ty + k]);
+                hGridScore += localMax;
               }
 
-              if (score > bestScore) {
-                bestScore = score;
+              // Heuristic 2 (THE FIX): STRICT LOCAL VERTICAL SCAN
+              // We scan THIS candidate area (y to y + boardHeight) for vertical grid lines.
+              // The scoreboard is just flat color or text, so it won't have 7 vertical lines.
+              const candidateBot = y + boardWidth;
+              if (candidateBot > height * 0.85) continue;
+
+              let vGridScore = 0;
+              // Check 7 internal vertical lines
+              for (let c = 1; c <= 7; c++) {
+                const tx = Math.floor(boardLeft + c * estimatedCellW);
+                let lineStrength = 0;
+                // Scan ONLY within the candidate board height
+                for (let sy = y + 10; sy < candidateBot - 10; sy += 4) {
+                  // Check gradient at this x
+                  // Look at pixel left vs right
+                  const diff = Math.abs(getGray(tx - 1, sy) - getGray(tx + 1, sy));
+                  if (diff > 10) lineStrength += diff;
+                }
+                vGridScore += lineStrength;
+              }
+
+              // Normalization is tricky, but relative comparison works.
+              // Scoreboard: hGridScore might be high (top/bottom borders), but vGridScore will be near 0.
+              // Real Board: Both will be high.
+
+              // We punish low vGridScore heavily.
+              const totalScore = hGridScore + vGridScore * 2.0;
+
+              if (totalScore > bestScore) {
+                bestScore = totalScore;
                 bestTopY = y;
               }
             }
 
-            // Refine TopY using the strongest single line found near bestTopY
-            // Actually, the frequency lock is usually very accurate.
+            if (bestTopY === -1) bestTopY = Math.floor(height * 0.22);
+
             const boardTop = bestTopY;
-            const boardBottom = boardTop + boardWidth; // Trust square aspect ratio
+            const boardBottom = boardTop + boardWidth;
             const boardHeight = boardWidth;
 
             // Debug Board
@@ -480,25 +500,23 @@
             ctx.lineWidth = 3;
             ctx.strokeRect(boardLeft, boardTop, boardWidth, boardHeight);
 
-            // Debug Grid (Verify alignment)
-            ctx.strokeStyle = 'rgba(255, 255, 0, 0.3)';
-            ctx.lineWidth = 1;
-            for (let i = 0; i <= 8; i++) {
-              const y = boardTop + i * estimatedCellH;
-              ctx.beginPath(); ctx.moveTo(boardLeft, y); ctx.lineTo(boardRight, y); ctx.stroke();
+            // Debug Grid
+            ctx.strokeStyle = 'orange';
+            for (let c = 1; c <= 7; c++) {
+              const x = boardLeft + c * estimatedCellW;
+              ctx.beginPath(); ctx.moveTo(x, boardTop); ctx.lineTo(x, boardBottom); ctx.stroke();
             }
 
             // === STEP 2: RECOGNIZE BOARD CONTENT ===
             const board = createBoard();
-            const cellW = estimatedCellH;
-            const cellH = estimatedCellH;
+            const cellW = estimatedCellW;
+            const cellH = estimatedCellW;
 
             for (let r = 0; r < 8; r++) {
               for (let c = 0; c < 8; c++) {
                 const cx = boardLeft + c * cellW + cellW * 0.5;
                 const cy = boardTop + r * cellH + cellH * 0.5;
 
-                // Sampling 5 points
                 const offset = cellW * 0.25;
                 const pts = [
                   { x: cx, y: cy },
@@ -513,15 +531,9 @@
                   const min = Math.min(p.r, p.g, p.b);
                   const sat = max === 0 ? 0 : (max - min) / max;
 
-                  // Detection Rules:
-                  // 1. Colorful: High Saturation (> 0.15) & Normal Brightness (> 60)
-                  // 2. Light: Low Saturation but Very Bright (> 150) & Contrast against dark bg?
-                  //    (Simplification: most empty cells are dark gray/black)
-                  // 3. Exception: Dark empty cells are... dark.
-
-                  if (max < 60) continue; // Too dark -> empty
+                  if (max < 60) continue; // Too dark
                   if (sat > 0.15) blockVotes++; // Colorful
-                  else if (max > 100 && (max - min) > 20) blockVotes++; // Bright & slightly colored
+                  else if (max > 100 && (max - min) > 20) blockVotes++; // Bright
                 }
 
                 if (blockVotes >= 2) {
@@ -532,31 +544,30 @@
               }
             }
 
-            // === STEP 3: PIECE RECOGNITION (AD-SAFE & ROBUST) ===
+            // === STEP 3: PIECE RECOGNITION (AD-SAFE) ===
             const pieces = [];
-
-            // Define Safe Zone: Immediately below board, limited height
             const pieceScanTop = boardBottom + 10;
             const pieceScanBot = Math.min(height - 5, pieceScanTop + boardHeight * 0.55);
             const zoneW = width / 3;
 
-            // Use median color of the "gutter" area as background
-            // Sample a vertical strip between zone 0 and 1
             const bgSamples = [];
             const sampleX = Math.floor(zoneW);
             for (let y = pieceScanTop; y < pieceScanBot; y += 10) {
               bgSamples.push(getPixel(sampleX, y));
             }
-            // Average
             const bgR = bgSamples.reduce((a, c) => a + c.r, 0) / bgSamples.length;
             const bgG = bgSamples.reduce((a, c) => a + c.g, 0) / bgSamples.length;
             const bgB = bgSamples.reduce((a, c) => a + c.b, 0) / bgSamples.length;
 
-            // Per-zone Analysis
+            ctx.strokeStyle = 'magenta';
+            ctx.beginPath();
+            ctx.moveTo(0, pieceScanTop); ctx.lineTo(width, pieceScanTop);
+            ctx.moveTo(0, pieceScanBot); ctx.lineTo(width, pieceScanBot);
+            ctx.stroke();
+
             for (let i = 0; i < 3; i++) {
               const zx = i * zoneW;
 
-              // Color Filtering & Clustering
               const points = [];
               for (let y = pieceScanTop; y < pieceScanBot; y += 3) {
                 for (let x = zx + 10; x < zx + zoneW - 10; x += 3) {
@@ -567,7 +578,6 @@
               }
 
               if (points.length > 25) {
-                // Bounding Box
                 let minX = width, maxX = 0, minY = height, maxY = 0;
                 for (const p of points) {
                   minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
@@ -577,23 +587,17 @@
                 ctx.strokeStyle = 'cyan';
                 ctx.strokeRect(minX, minY, maxX - minX, maxY - minY);
 
-                // Grid Fit
-                // Center of mass might be better than bbox center for weird shapes,
-                // but bbox center is robust enough for small 5x5 grids usually.
                 const cx = (minX + maxX) / 2;
                 const cy = (minY + maxY) / 2;
-                // Pieces are typically ~ 60% of board cell size
                 const pCellS = cellW * 0.53;
 
                 const shape = Array(5).fill().map(() => Array(5).fill(0));
-                let hasBlock = false;
 
                 for (let r = -2; r <= 2; r++) {
                   for (let c = -2; c <= 2; c++) {
                     const tx = cx + c * pCellS;
                     const ty = cy + r * pCellS;
 
-                    // Verify (3x3 area check)
                     let hit = 0;
                     for (let dy = -1; dy <= 1; dy++) {
                       for (let dx = -1; dx <= 1; dx++) {
@@ -602,7 +606,6 @@
                     }
                     if (hit >= 2) {
                       shape[r + 2][c + 2] = 1;
-                      hasBlock = true;
                       ctx.fillStyle = 'blue';
                       ctx.fillRect(tx - 2, ty - 2, 4, 4);
                     }
