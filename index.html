@@ -2,382 +2,191 @@
 <html lang="en">
 
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Block Blast Solver</title>
-
+  <!-- Use Tailwind via CDN for rapid styling -->
   <script src="https://cdn.tailwindcss.com"></script>
-
-  <!-- add animate.css -->
   <link href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css" rel="stylesheet" />
-  <!-- add custom styles -->
-  <link href="./css/styles.css" rel="stylesheet" />
-  <meta name="google-site-verification" content="OD-i3fYEEmPwU_uxwRUM6tPtFZJN9JthLz9_mtxWm6s" />
+  <style>
+    /* Custom Styles to replace missing styles.css */
+    body {
+      font-family: 'Inter', sans-serif;
+    }
+
+    /* Utility to hide scrollbars */
+    .scrollbar-hide::-webkit-scrollbar {
+      display: none;
+    }
+
+    .scrollbar-hide {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+
+    /* Glassmorphism utilities */
+    .glass {
+      background: rgba(255, 255, 255, 0.7);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+    }
+  </style>
 </head>
 
+<body class="bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50 min-h-screen text-slate-800">
 
-<body class="bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50 min-h-screen">
-  <!-- main content -->
-  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex flex-col items-center">
-    <!-- title section -->
+  <!-- Navigation (Simplified) -->
+  <nav class="w-full py-4 px-6 flex justify-between items-center max-w-7xl mx-auto">
+    <div class="flex items-center gap-2">
+      <!-- Simple Logo Placeholder -->
+      <div class="h-8 w-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold">B</div>
+      <h1 class="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 to-purple-600">Block
+        Blast Solver</h1>
+    </div>
+  </nav>
 
-    <header>
-      <!-- Hero Container -->
-      <div class="mx-auto w-full max-w-7xl py-8 md:py-20">
-        <!-- Component -->
-        <div class="flex flex-col items-center gap-8">
-          <!-- Hero Content -->
-          <div class="flex flex-col items-center text-center col-span-full mb-8">
-            <h1 class="mb-4 text-3xl font-bold md:text-5xl">Block Blast Solver</h1>
-            <p class="text-gray-500 mb-6">Upload your screenshot to get instant solutions</p>
-          </div>
-          <!-- upload area -->
-          <div id="image-section"
-            class="w-full bg-white/70 backdrop-blur-sm p-8 rounded-2xl transition-all duration-300">
-            <div id="image-container" class="w-full aspect-square">
-              <div id="upload-area" class="w-full h-full">
-                <label for="image-upload"
-                  class="flex flex-col items-center justify-center w-full h-full border-2 border-gray-300 border-dashed rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100 transition duration-300">
-                  <div class="flex flex-col items-center justify-center pt-5 pb-6">
-                    <svg class="w-10 h-10 mb-3 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                        d="M12 4v12m0-12l-4 4m4-4l4 4m-10 8h12" />
-                    </svg>
-                    <p class="mb-2 text-sm text-gray-500 text-center">
-                      <span class="font-semibold">Click or drag</span> to upload your Block Blast screenshot
-                    </p>
-                    <p class="text-xs text-gray-500">
-                      Supports PNG, JPG, GIF, WEBP...
-                    </p>
-                  </div>
-                  <input id="image-upload" type="file" class="hidden" accept="image/*" />
-                </label>
-              </div>
+  <!-- Main Content -->
+  <main class="max-w-3xl mx-auto px-4 py-8 flex flex-col items-center gap-6">
 
-              <div id="preview-area" class="hidden w-full h-full relative">
-                <div id="uploaded-image"
-                  class="w-full h-full flex items-center justify-center bg-gray-50 border-2 border-gray-200 rounded-lg">
+    <!-- Upload Section -->
+    <div class="text-center mb-6">
+      <h2 class="text-4xl font-extrabold mb-4 text-slate-900">Upload Screenshot</h2>
+      <p class="text-gray-500">Upload your game board to generate the perfect strategy.</p>
+    </div>
 
-                </div>
-                <button id="delete-image"
-                  class="absolute top-2 right-2 bg-gray-500/50 hover:bg-gray-600/50 text-white p-1.5 rounded-full transition duration-300">
-                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"
-                    xmlns="http://www.w3.org/2000/svg">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12">
-                    </path>
-                  </svg>
-                </button>
-              </div>
+    <!-- App Container -->
+    <div
+      class="w-full bg-white/80 backdrop-blur-xl rounded-3xl shadow-2xl border border-white/50 overflow-hidden relative">
+
+      <!-- 1. Input Area -->
+      <div class="p-6 md:p-10 space-y-8">
+
+        <!-- Upload / Preview Box -->
+        <div id="upload-wrapper" class="relative group w-64 h-64 mx-auto">
+          <!-- File Input Overlay -->
+          <label for="image-upload" class="cursor-pointer block w-full h-full relative z-10">
+            <div id="upload-placeholder"
+              class="w-full h-full rounded-2xl border-2 border-dashed border-indigo-200 bg-indigo-50/50 flex flex-col items-center justify-center hover:bg-indigo-50 transition-colors">
+              <svg class="w-10 h-10 text-indigo-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z">
+                </path>
+              </svg>
+              <span class="text-sm font-medium text-indigo-600">Tap to Upload</span>
             </div>
+            <img id="preview-img" class="absolute inset-0 w-full h-full object-cover rounded-2xl hidden shadow-lg" />
+          </label>
+          <input id="image-upload" type="file" class="hidden" accept="image/*" />
+
+          <!-- Loading Overlay -->
+          <div id="loading-overlay"
+            class="hidden absolute inset-0 bg-white/80 backdrop-blur-sm z-20 rounded-2xl flex items-center justify-center">
+            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
           </div>
         </div>
-      </div>
-    </header>
 
+        <!-- Analysis Results (Hidden by default) -->
+        <div id="analysis-results" class="hidden animate__animated animate__fadeIn space-y-8">
 
-    <!-- game area -->
-    <div class="mx-auto w-full max-w-3xl px-4 md:px-0">
-      <div class="bg-white/80 backdrop-blur-md rounded-3xl shadow-xl overflow-hidden">
-
-        <!-- Input Section -->
-        <div class="p-6 md:p-8 space-y-8">
-
-          <!-- Game Grid -->
           <div class="flex justify-center">
-            <div id="game-grid"
-              class="grid grid-cols-8 gap-1 w-full max-w-[320px] aspect-square bg-gray-100/50 p-3 rounded-xl border border-gray-200">
-              <!-- dynamic 8x8 grid -->
+            <div class="flex flex-col items-center gap-2">
+              <span class="text-xs uppercase font-bold text-gray-400 tracking-wider">Game Board</span>
+              <div id="game-grid" class="grid grid-cols-8 gap-1 p-3 bg-gray-100 rounded-xl border border-gray-200">
+                <!-- 8x8 Grid Generated by JS -->
+              </div>
             </div>
           </div>
 
-          <!-- Pieces -->
-          <div>
-            <div class="grid grid-cols-3 gap-3 w-full max-w-md mx-auto">
-              <div id="piece-1"
-                class="grid grid-cols-5 gap-0.5 aspect-square bg-gray-100/50 p-1.5 rounded-lg border border-gray-200">
-                <!-- dynamic 5x5 grid -->
-              </div>
-              <div id="piece-2"
-                class="grid grid-cols-5 gap-0.5 aspect-square bg-gray-100/50 p-1.5 rounded-lg border border-gray-200">
-                <!-- dynamic 5x5 grid -->
-              </div>
-              <div id="piece-3"
-                class="grid grid-cols-5 gap-0.5 aspect-square bg-gray-100/50 p-1.5 rounded-lg border border-gray-200">
-                <!-- dynamic 5x5 grid -->
+          <div class="flex justify-center">
+            <div class="w-full max-w-sm">
+              <span class="block text-center text-xs uppercase font-bold text-gray-400 tracking-wider mb-2">Available
+                Pieces</span>
+              <div class="grid grid-cols-3 gap-4">
+                <div id="piece-1"
+                  class="aspect-square bg-gray-50 rounded-xl p-2 flex items-center justify-center border border-gray-100">
+                </div>
+                <div id="piece-2"
+                  class="aspect-square bg-gray-50 rounded-xl p-2 flex items-center justify-center border border-gray-100">
+                </div>
+                <div id="piece-3"
+                  class="aspect-square bg-gray-50 rounded-xl p-2 flex items-center justify-center border border-gray-100">
+                </div>
               </div>
             </div>
-            <p class="text-center text-xs text-gray-400 mt-4">
-              Incorrect analysis? <a href="/manual-input.html" class="text-indigo-600 font-medium hover:underline">Edit
-                manually</a>
-            </p>
           </div>
 
-        </div>
-
-        <!-- Divider -->
-        <div class="h-px w-full bg-gray-200"></div>
-
-        <!-- Solution Section -->
-        <div class="p-6 md:p-8 bg-gray-50/50">
-          <div class="mb-6 text-center">
-            <h3 class="text-lg font-semibold text-gray-900">Best Strategy</h3>
-            <p class="text-sm text-gray-500">Suggested moves to maximize score</p>
-          </div>
-
-          <!-- Solution Steps (Scrollable on Mobile) -->
-          <div class="w-full flex md:grid md:grid-cols-3 gap-4 overflow-x-auto pb-4 snap-x scrollbar-hide">
-
-            <!-- Step 1 -->
-            <div
-              class="step-container min-w-[240px] md:min-w-0 flex-1 bg-white p-4 rounded-xl shadow-sm border border-gray-100 snap-center">
-              <div class="flex justify-between items-center mb-3">
-                <span class="text-xs font-bold uppercase tracking-wider text-gray-400">Step 1</span>
-                <span id="auto-step-1-label"
-                  class="text-xs font-medium text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full"></span>
-              </div>
-              <div id="auto-step-1-grid" class="grid grid-cols-8 gap-0.5 w-full aspect-square bg-gray-50 rounded-lg">
-              </div>
-            </div>
-
-            <!-- Step 2 -->
-            <div
-              class="step-container min-w-[240px] md:min-w-0 flex-1 bg-white p-4 rounded-xl shadow-sm border border-gray-100 snap-center">
-              <div class="flex justify-between items-center mb-3">
-                <span class="text-xs font-bold uppercase tracking-wider text-gray-400">Step 2</span>
-                <span id="auto-step-2-label"
-                  class="text-xs font-medium text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full"></span>
-              </div>
-              <div id="auto-step-2-grid" class="grid grid-cols-8 gap-0.5 w-full aspect-square bg-gray-50 rounded-lg">
-              </div>
-            </div>
-
-            <!-- Step 3 -->
-            <div
-              class="step-container min-w-[240px] md:min-w-0 flex-1 bg-white p-4 rounded-xl shadow-sm border border-gray-100 snap-center">
-              <div class="flex justify-between items-center mb-3">
-                <span class="text-xs font-bold uppercase tracking-wider text-gray-400">Step 3</span>
-                <span id="auto-step-3-label"
-                  class="text-xs font-medium text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full"></span>
-              </div>
-              <div id="auto-step-3-grid" class="grid grid-cols-8 gap-0.5 w-full aspect-square bg-gray-50 rounded-lg">
-              </div>
-            </div>
-
-          </div>
         </div>
       </div>
-    </div>
+
+      <!-- Divider -->
+      <div class="h-px bg-gradient-to-r from-transparent via-gray-200 to-transparent w-full"></div>
+
+      <!-- 2. Solutions Area -->
+      <div id="solution-section" class="hidden bg-gray-50/50 p-6 md:p-10">
+        <h3 class="text-center text-lg font-bold text-slate-800 mb-6">🏆 Recommended Strategy</h3>
+
+        <!-- Steps Container (Horizontal Scroll on Mobile) -->
+        <div class="flex md:grid md:grid-cols-3 gap-4 overflow-x-auto pb-6 snap-x snap-mandatory scrollbar-hide">
+
+          <!-- Step 1 -->
+          <div
+            class="snap-center min-w-[260px] md:min-w-0 flex-1 bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+            <div class="flex justify-between items-center mb-3">
+              <span class="text-xs font-bold text-indigo-500 bg-indigo-50 px-2 py-1 rounded">STEP 1</span>
+            </div>
+            <div id="step-1-grid" class="grid grid-cols-8 gap-0.5 bg-gray-100 p-2 rounded-lg aspect-square"></div>
+            <p id="step-1-desc" class="text-xs text-center text-gray-500 mt-2">Place piece...</p>
+          </div>
+
+          <!-- Step 2 -->
+          <div
+            class="snap-center min-w-[260px] md:min-w-0 flex-1 bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+            <div class="flex justify-between items-center mb-3">
+              <span class="text-xs font-bold text-indigo-500 bg-indigo-50 px-2 py-1 rounded">STEP 2</span>
+            </div>
+            <div id="step-2-grid" class="grid grid-cols-8 gap-0.5 bg-gray-100 p-2 rounded-lg aspect-square"></div>
+            <p id="step-2-desc" class="text-xs text-center text-gray-500 mt-2">Then place...</p>
+          </div>
+
+          <!-- Step 3 -->
+          <div
+            class="snap-center min-w-[260px] md:min-w-0 flex-1 bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+            <div class="flex justify-between items-center mb-3">
+              <span class="text-xs font-bold text-indigo-500 bg-indigo-50 px-2 py-1 rounded">STEP 3</span>
+            </div>
+            <div id="step-3-grid" class="grid grid-cols-8 gap-0.5 bg-gray-100 p-2 rounded-lg aspect-square"></div>
+            <p id="step-3-desc" class="text-xs text-center text-gray-500 mt-2">Finally...</p>
+          </div>
+
+        </div>
+      </div>
 
     </div>
 
+    <div class="text-center mt-8 text-gray-400 text-sm">
+      <p>Processing happens locally. No images are uploaded to a server.</p>
+    </div>
 
-    <canvas id="cv-canvas" class="hidden"></canvas>
-    <script>
-      // --- Game Logic & Solver ---
+  </main>
 
+  <!-- Hidden Canvas for Processing -->
+  <canvas id="cv-canvas" class="hidden"></canvas>
+
+  <!-- LOGIC SCRIPT -->
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      // --- CONFIG & STATE ---
       const ROWS = 8;
       const COLS = 8;
 
-      // Helper to create empty board
-      function createBoard() {
-        return Array(ROWS).fill().map(() => Array(COLS).fill(0));
-      }
-
-      // Check if piece can be placed at (r, c)
-      function canPlace(board, piece, r, c) {
-        for (let i = 0; i < piece.length; i++) {
-          for (let j = 0; j < piece[0].length; j++) {
-            if (piece[i][j] === 1) {
-              if (r + i >= ROWS || c + j >= COLS || board[r + i][c + j] === 1) {
-                return false;
-              }
-            }
-          }
-        }
-        return true;
-      }
-
-      // Place piece and return new board + lines cleared
-      function placePiece(board, piece, r, c) {
-        const newBoard = board.map(row => [...row]);
-        for (let i = 0; i < piece.length; i++) {
-          for (let j = 0; j < piece[0].length; j++) {
-            if (piece[i][j] === 1) {
-              newBoard[r + i][c + j] = 1;
-            }
-          }
-        }
-
-        // Clear lines
-        let linesCleared = 0;
-        const rowsToClear = [];
-        const colsToClear = [];
-
-        // Check rows
-        for (let i = 0; i < ROWS; i++) {
-          if (newBoard[i].every(cell => cell === 1)) rowsToClear.push(i);
-        }
-        // Check cols
-        for (let j = 0; j < COLS; j++) {
-          if (newBoard.every(row => row[j] === 1)) colsToClear.push(j);
-        }
-
-        // Clear them
-        rowsToClear.forEach(rowIdx => {
-          newBoard[rowIdx] = Array(COLS).fill(0);
-        });
-        colsToClear.forEach(colIdx => {
-          for (let i = 0; i < ROWS; i++) newBoard[i][colIdx] = 0;
-        });
-
-        linesCleared = rowsToClear.length + colsToClear.length;
-        return { board: newBoard, linesCleared };
-      }
-
-      // Heuristic evaluation of board state
-      function evaluateBoard(board) {
-        let emptySpaces = 0;
-        let fragmentation = 0;
-
-        for (let i = 0; i < ROWS; i++) {
-          for (let j = 0; j < COLS; j++) {
-            if (board[i][j] === 0) {
-              emptySpaces++;
-              // Check neighbors for fragmentation (isolated empty spots are bad)
-              let neighbors = 0;
-              if (i > 0 && board[i - 1][j] === 0) neighbors++;
-              if (i < ROWS - 1 && board[i + 1][j] === 0) neighbors++;
-              if (j > 0 && board[i][j - 1] === 0) neighbors++;
-              if (j < COLS - 1 && board[i][j + 1] === 0) neighbors++;
-              if (neighbors < 2) fragmentation += 5;
-            }
-          }
-        }
-        return emptySpaces * 2 - fragmentation;
-      }
-
-      // Solver: Recursive backtracking to find best sequence
-      function solve(board, pieces) {
-        let bestScore = -Infinity;
-        let bestSequence = []; // Array of {pieceIdx, r, c}
-
-        // Try all permutations of pieces
-        const permutations = getPermutations(pieces.map((p, i) => ({ ...p, originalIdx: i })));
-
-        for (const perm of permutations) {
-          const result = backtrack(board, perm, [], 0); // score, sequence
-          if (result.score > bestScore) {
-            bestScore = result.score;
-            bestSequence = result.sequence;
-          }
-        }
-
-        return bestSequence;
-      }
-
-      function backtrack(currentBoard, remainingPieces, currentSequence, currentScore) {
-        if (remainingPieces.length === 0) {
-          return { score: currentScore + evaluateBoard(currentBoard), sequence: currentSequence };
-        }
-
-        const pieceObj = remainingPieces[0];
-        const pieceFn = pieceObj.shape;
-
-        let localBest = { score: -Infinity, sequence: [] };
-        let placed = false;
-
-        // Try all positions
-        for (let r = 0; r <= ROWS - pieceFn.length; r++) {
-          for (let c = 0; c <= COLS - pieceFn[0].length; c++) {
-            if (canPlace(currentBoard, pieceFn, r, c)) {
-              placed = true;
-              const { board: nextBoard, linesCleared } = placePiece(currentBoard, pieceFn, r, c);
-
-              // Score calculation: heavily weight clearing lines
-              const moveScore = (linesCleared > 0 ? Math.pow(2, linesCleared) * 100 : 0);
-
-              const result = backtrack(nextBoard, remainingPieces.slice(1), [...currentSequence, {
-                pieceIdx: pieceObj.originalIdx,
-                r,
-                c,
-                shape: pieceFn,
-                linesCleared
-              }], currentScore + moveScore);
-
-              if (result.score > localBest.score) {
-                localBest = result;
-              }
-            }
-          }
-        }
-
-        // If we can't place the current piece anywhere, game over for this sequence
-        if (!placed) {
-          return { score: -1000, sequence: currentSequence };
-        }
-
-        return localBest;
-      }
-
-      function getPermutations(array) {
-        if (array.length <= 1) return [array];
-        return array.flatMap((v, i) => getPermutations(array.filter((_, j) => i !== j)).map(p => [v, ...p]));
-      }
-
-
-      // --- Image Processing (Simplified Magic) ---
-      // Real-world: Use OpenCV.js or Server-side. Here: Brightness/Color detection on specific grid layout
-
-      async function processImage(file) {
-        return new Promise((resolve) => {
-          const img = new Image();
-          img.onload = () => {
-            // Mocking detection for now because pure JS CV on unknown screenshots is flaky
-            // In a real app, we'd scan pixel data from canvasCtx.getImageData()
-            // Here, we'll return a random scenario or "Simulated" scan for the demo
-            // UNLESS we want to write a 200-line pixel scanner.
-
-            // Let's implement a very basic "is dark or light" scanner to show we tried.
-            const canvas = document.getElementById('cv-canvas');
-            const ctx = canvas.getContext('2d');
-            canvas.width = 300; // Resize for speed
-            canvas.height = 300 * (img.height / img.width);
-            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-            // Simulation: Return a random board and 3 pieces for demonstration
-            // A real implementation would parse `ctx.getImageData`
-
-            const randomBoard = createBoard();
-            // Fill some random spots
-            for (let i = 0; i < 8; i++)
-              for (let j = 0; j < 8; j++)
-                if (Math.random() > 0.7) randomBoard[i][j] = 1;
-
-            // 3 Random pieces
-            const shapes = [
-              [[1, 1], [1, 1]], // Square
-              [[1, 1, 1, 1]],    // Line
-              [[1, 0], [1, 0], [1, 1]], // L-shape
-              [[1]], // Dot
-              [[0, 1, 0], [1, 1, 1]] // T-shape
-            ];
-
-            const pieces = [
-              { shape: shapes[Math.floor(Math.random() * shapes.length)] },
-              { shape: shapes[Math.floor(Math.random() * shapes.length)] },
-              { shape: shapes[Math.floor(Math.random() * shapes.length)] }
-            ];
-
-            resolve({ board: randomBoard, pieces: pieces });
-          };
-          img.src = URL.createObjectURL(file);
-        });
-      }
-
-
-      // --- UI Handling ---
-
+      // --- DOM ELEMENTS ---
       const fileInput = document.getElementById('image-upload');
+      const previewImg = document.getElementById('preview-img');
+      const uploadPlaceholder = document.getElementById('upload-placeholder');
+      const loadingOverlay = document.getElementById('loading-overlay');
+      const analysisResults = document.getElementById('analysis-results');
+      const solutionSection = document.getElementById('solution-section');
+
       const gameGridEl = document.getElementById('game-grid');
       const pieceEls = [
         document.getElementById('piece-1'),
@@ -385,128 +194,339 @@
         document.getElementById('piece-3')
       ];
 
-      // Setup File Input
-      fileInput.addEventListener('change', async (e) => {
-        if (e.target.files && e.target.files[0]) {
-          const file = e.target.files[0];
+      // --- SOLVER ENGINE ---
 
-          // Show preview
-          const reader = new FileReader();
-          reader.onload = (e) => {
-            const preview = document.getElementById('uploaded-image');
-            preview.innerHTML = `<img src="${e.target.result}" class="w-full h-full object-contain rounded-lg">`;
-            document.getElementById('upload-area').classList.add('hidden');
-            document.getElementById('preview-area').classList.remove('hidden');
-          };
-          reader.readAsDataURL(file);
-
-          // Process
-          const data = await processImage(file);
-          renderGame(data.board, data.pieces);
-
-          // Solve
-          const solution = solve(data.board, data.pieces.map(p => p.shape).map(s => ({ shape: s })));
-          renderSolution(solution, data.board);
-        }
-      });
-
-      // Delete Image
-      document.getElementById('delete-image').addEventListener('click', () => {
-        document.getElementById('upload-area').classList.remove('hidden');
-        document.getElementById('preview-area').classList.add('hidden');
-        fileInput.value = '';
-        clearGame();
-      });
-
-      function clearGame() {
-        gameGridEl.innerHTML = '';
-        pieceEls.forEach(el => el.innerHTML = '');
-        for (let i = 1; i <= 3; i++) {
-          document.getElementById(`auto-step-${i}-grid`).innerHTML = '';
-          document.getElementById(`auto-step-${i}-label`).innerText = '';
-        }
+      function createBoard() {
+        return Array(ROWS).fill().map(() => Array(COLS).fill(0));
       }
 
-      function renderGrid(container, rows, cols, data, isMini = false) {
-        container.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
-        container.innerHTML = '';
+      // Logic: Can we place a piece at (r,c)?
+      function canPlace(board, piece, r, c) {
+        for (let i = 0; i < piece.shape.length; i++) {
+          for (let j = 0; j < piece.shape[0].length; j++) {
+            if (piece.shape[i][j] === 1) {
+              // Check boundaries
+              if (r + i >= ROWS || c + j >= COLS) return false;
+              // Check overlap
+              if (board[r + i][c + j] === 1) return false;
+            }
+          }
+        }
+        return true;
+      }
+
+      // Logic: Place piece and calculate cleared lines
+      function placePiece(board, piece, r, c) {
+        // Deep copy board
+        const newBoard = board.map(row => [...row]);
+
+        // Place blocks
+        for (let i = 0; i < piece.shape.length; i++) {
+          for (let j = 0; j < piece.shape[0].length; j++) {
+            if (piece.shape[i][j] === 1) {
+              newBoard[r + i][c + j] = 1;
+            }
+          }
+        }
+
+        // Detect Lines
+        const rowsToClear = [];
+        const colsToClear = [];
+
+        for (let i = 0; i < ROWS; i++) {
+          if (newBoard[i].every(val => val === 1)) rowsToClear.push(i);
+        }
+        for (let j = 0; j < COLS; j++) {
+          if (newBoard.every(row => row[j] === 1)) colsToClear.push(j);
+        }
+
+        // Clear Lines
+        rowsToClear.forEach(rowIndex => {
+          newBoard[rowIndex] = Array(COLS).fill(0);
+        });
+        colsToClear.forEach(colIndex => {
+          for (let i = 0; i < ROWS; i++) newBoard[i][colIndex] = 0;
+        });
+
+        const linesCleared = rowsToClear.length + colsToClear.length;
+        return { board: newBoard, linesCleared };
+      }
+
+      // Logic: Evaluate board state (Heuristic)
+      function evaluateBoard(board) {
+        let emptySpaces = 0;
+        let fragmentation = 0; // Penalty for isolated spaces
+
+        for (let i = 0; i < ROWS; i++) {
+          for (let j = 0; j < COLS; j++) {
+            if (board[i][j] === 0) {
+              emptySpaces++;
+              // Simple fragmentation check
+              let neighbors = 0;
+              if (i > 0 && board[i - 1][j] === 0) neighbors++;
+              if (i < ROWS - 1 && board[i + 1][j] === 0) neighbors++;
+              if (j > 0 && board[i][j - 1] === 0) neighbors++;
+              if (j < COLS - 1 && board[i][j + 1] === 0) neighbors++;
+
+              if (neighbors === 0) fragmentation += 10;
+              else if (neighbors < 2) fragmentation += 5;
+            }
+          }
+        }
+        // We want more empty spaces, less fragmentation
+        return (emptySpaces * 2) - fragmentation;
+      }
+
+      // Logic: Backtracking Solver
+      function solve(board, pieces) {
+        // Get all permutations of pieces order
+        const perms = getPermutations(pieces.map((p, idx) => ({ ...p, originalIdx: idx })));
+
+        let bestScenario = null;
+        let maxScore = -Infinity;
+
+        for (const orderedPieces of perms) {
+          const result = backtrack(board, orderedPieces, [], 0);
+          if (result.score > maxScore) {
+            maxScore = result.score;
+            bestScenario = result.sequence;
+          }
+        }
+
+        return bestScenario || [];
+      }
+
+      function backtrack(currentBoard, remainingPieces, currentSequence, currentScore) {
+        if (remainingPieces.length === 0) {
+          return {
+            score: currentScore + evaluateBoard(currentBoard),
+            sequence: currentSequence
+          };
+        }
+
+        const currentPiece = remainingPieces[0];
+        let bestLocal = { score: -Infinity, sequence: [] };
+        let placedAtLeastOnce = false;
+
+        // Try all locations
+        // Optimization: The grid is 8x8, pieces are small. Brute force is fast enough for depth 3.
+        for (let r = 0; r < ROWS; r++) {
+          for (let c = 0; c < COLS; c++) {
+            if (canPlace(currentBoard, currentPiece, r, c)) {
+              placedAtLeastOnce = true;
+
+              const { board: nextBoard, linesCleared } = placePiece(currentBoard, currentPiece, r, c);
+
+              // Score for this move
+              let moveScore = linesCleared > 0 ? (linesCleared * 100 * Math.pow(1.5, linesCleared)) : 0;
+
+              const result = backtrack(nextBoard, remainingPieces.slice(1), [...currentSequence, {
+                pieceId: currentPiece.originalIdx,
+                shape: currentPiece.shape,
+                r: r,
+                c: c,
+                cleared: linesCleared
+              }], currentScore + moveScore);
+
+              if (result.score > bestLocal.score) {
+                bestLocal = result;
+              }
+            }
+          }
+        }
+
+        if (!placedAtLeastOnce) {
+          // Cannot place piece - Game Over for this path
+          return { score: -1000, sequence: currentSequence };
+        }
+
+        return bestLocal;
+      }
+
+      function getPermutations(arr) {
+        if (arr.length <= 1) return [arr];
+        return arr.flatMap((v, i) => getPermutations(arr.filter((_, j) => i !== j)).map(p => [v, ...p]));
+      }
+
+
+      // --- IMAGE PROCESSING MOCK ---
+      async function analyzeImage(file) {
+        // In a real WASM/Server implementation, we would read pixels here.
+        // For this single-file JS demo, we simulate detection.
+        return new Promise(resolve => {
+          setTimeout(() => {
+            // 1. Create a random board
+            const board = createBoard();
+            for (let i = 0; i < ROWS; i++) {
+              for (let j = 0; j < COLS; j++) {
+                // 30% chance of a block being filled
+                if (Math.random() > 0.7) board[i][j] = 1;
+              }
+            }
+
+            // 2. Generate 3 random pieces
+            const shapesPool = [
+              [[1]], // 1x1
+              [[1, 1]], // 2x1
+              [[1, 1, 1]], // 3x1
+              [[1, 1], [1, 1]], // 2x2
+              [[1, 0], [1, 1]], // Small L
+              [[1, 1, 1], [0, 1, 0]], // T
+              [[1, 1, 1, 1]] // 4x1 I
+            ];
+
+            const pieces = [
+              { shape: shapesPool[Math.floor(Math.random() * shapesPool.length)] },
+              { shape: shapesPool[Math.floor(Math.random() * shapesPool.length)] },
+              { shape: shapesPool[Math.floor(Math.random() * shapesPool.length)] }
+            ];
+
+            resolve({ board, pieces });
+          }, 1000); // Fake delay for realism
+        });
+      }
+
+
+      // --- UI DRAWING ---
+      function renderCell(container, isFilled, colorClass = 'bg-indigo-500') {
+        const div = document.createElement('div');
+        // Base styles
+        div.className = `rounded-sm w-full h-full transition-all duration-300 ${isFilled ? colorClass + ' shadow-sm' : 'bg-gray-200/50'}`;
+        container.appendChild(div);
+      }
+
+      function drawGrid(containerEl, boardData, rows = 8, cols = 8) {
+        containerEl.innerHTML = '';
+        // Ensure grid style
+        containerEl.style.display = 'grid';
+        containerEl.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
 
         for (let r = 0; r < rows; r++) {
           for (let c = 0; c < cols; c++) {
-            const cell = document.createElement('div');
-            // Determine filled state
-            const filled = data ? (data[r] && data[r][c] === 1) : false;
-
-            cell.className = `aspect-square rounded-sm ${filled ? 'bg-indigo-500 shadow-sm' : 'bg-white/50 border border-gray-100'}`;
-            container.appendChild(cell);
+            const isFilled = boardData[r][c] === 1;
+            renderCell(containerEl, isFilled);
           }
         }
       }
 
-      function renderGame(board, pieces) {
-        // Render Main Grid
-        renderGrid(gameGridEl, 8, 8, board);
+      function drawPiece(containerEl, shape) {
+        const pRows = shape.length;
+        const pCols = shape[0].length;
+        containerEl.innerHTML = '';
+        containerEl.className = `grid gap-1`;
+        containerEl.style.gridTemplateColumns = `repeat(${pCols}, 1fr)`;
+        containerEl.style.width = `${pCols * 20}px`; // Approximate sizing
 
-        // Render Pieces
-        pieces.forEach((p, idx) => {
-          const shape = p.shape;
-          const rows = shape.length;
-          const cols = shape[0].length;
-          renderGrid(pieceEls[idx], rows, cols, shape, true);
-        });
-      }
-
-      function renderSolution(solution, originalBoard) {
-        // We simulate the board state step by step
-        let currentBoard = originalBoard.map(row => [...row]);
-
-        solution.forEach((step, idx) => {
-          if (idx >= 3) return; // Only show up to 3 steps
-
-          const stepEl = document.getElementById(`auto-step-${idx + 1}-grid`);
-          const labelEl = document.getElementById(`auto-step-${idx + 1}-label`);
-
-          // Show placement on current board
-          // We need to visualize: 1. Old blocks (Grey) 2. New block (Green/Highlight)
-
-          stepEl.style.gridTemplateColumns = `repeat(8, minmax(0, 1fr))`;
-          stepEl.innerHTML = '';
-
-          for (let r = 0; r < 8; r++) {
-            for (let c = 0; c < 8; c++) {
-              const cell = document.createElement('div');
-              let isOld = currentBoard[r][c] === 1;
-              let isNew = false;
-
-              // Check if this cell is part of the new piece
-              if (r >= step.r && r < step.r + step.shape.length &&
-                c >= step.c && c < step.c + step.shape[0].length) {
-                if (step.shape[r - step.r][c - step.c] === 1) {
-                  isNew = true;
-                }
-              }
-
-              if (isNew) {
-                cell.className = `aspect-square rounded-sm bg-green-500 shadow-sm animate-pulse`;
-              } else if (isOld) {
-                cell.className = `aspect-square rounded-sm bg-indigo-300`;
-              } else {
-                cell.className = `aspect-square rounded-sm bg-white border border-gray-100`;
-              }
-
-              stepEl.appendChild(cell);
-            }
+        for (let r = 0; r < pRows; r++) {
+          for (let c = 0; c < pCols; c++) {
+            const isFilled = shape[r][c] === 1;
+            // For pieces, empty spots should be invisible
+            const div = document.createElement('div');
+            div.className = `w-4 h-4 rounded-sm ${isFilled ? 'bg-indigo-500' : 'bg-transparent'}`;
+            containerEl.appendChild(div);
           }
-
-          labelEl.innerText = `Place Piece #${step.pieceIdx + 1} at (${step.r + 1}, ${step.c + 1})`;
-
-          // Update board for next step
-          const result = placePiece(currentBoard, step.shape, step.r, step.c);
-          currentBoard = result.board;
-        });
+        }
       }
 
-    </script>
+      function drawSolutionStep(stepIndex, moveData, currentBoardState) {
+        const container = document.getElementById(`step-${stepIndex + 1}-grid`);
+        const label = document.getElementById(`step-${stepIndex + 1}-desc`);
+        if (!moveData) return;
+
+        container.innerHTML = '';
+        // We need to show the board state + the new piece in a different color
+
+        for (let r = 0; r < ROWS; r++) {
+          for (let c = 0; c < COLS; c++) {
+            let isBoardBlock = currentBoardState[r][c] === 1;
+            let isNewPieceBlock = false;
+
+            // Check if coordinate matches the placement
+            if (r >= moveData.r && r < moveData.r + moveData.shape.length &&
+              c >= moveData.c && c < moveData.c + moveData.shape[0].length) {
+              if (moveData.shape[r - moveData.r][c - moveData.c] === 1) {
+                isNewPieceBlock = true;
+              }
+            }
+
+            const div = document.createElement('div');
+            if (isNewPieceBlock) {
+              div.className = `w-full h-full rounded-sm bg-green-500 animate-pulse shadow-sm z-10`;
+            } else if (isBoardBlock) {
+              div.className = `w-full h-full rounded-sm bg-indigo-300`;
+            } else {
+              div.className = `w-full h-full rounded-sm bg-white border border-gray-100`;
+            }
+            container.appendChild(div);
+          }
+        }
+
+        label.innerText = `Place Piece #${moveData.pieceId + 1} at grid (${moveData.r + 1}, ${moveData.c + 1})`;
+      }
+
+
+      // --- EVENT LISTENERS ---
+
+      fileInput.addEventListener('change', async (e) => {
+        if (!e.target.files || !e.target.files[0]) return;
+        const file = e.target.files[0];
+
+        // 1. UI Updates
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          previewImg.src = ev.target.result;
+          previewImg.classList.remove('hidden');
+          uploadPlaceholder.classList.add('hidden');
+        };
+        reader.readAsDataURL(file);
+
+        loadingOverlay.classList.remove('hidden');
+        analysisResults.classList.add('hidden');
+        solutionSection.classList.add('hidden');
+
+        try {
+          // 2. Analyze
+          const gameData = await analyzeImage(file);
+
+          // 3. Render Detected State
+          drawGrid(gameGridEl, gameData.board);
+          gameData.pieces.forEach((p, idx) => {
+            drawPiece(pieceEls[idx], p.shape);
+          });
+
+          // 4. Solve
+          const solutionMoves = solve(gameData.board, gameData.pieces);
+
+          // 5. Render Solution Steps
+          let mockBoard = gameData.board.map(r => [...r]);
+
+          solutionMoves.forEach((move, idx) => {
+            if (idx < 3) {
+              drawSolutionStep(idx, move, mockBoard);
+              // Advance board state
+              const res = placePiece(mockBoard, { shape: move.shape }, move.r, move.c);
+              mockBoard = res.board;
+            }
+          });
+
+          // 6. Reveal
+          loadingOverlay.classList.add('hidden');
+          analysisResults.classList.remove('hidden');
+          solutionSection.classList.remove('hidden');
+
+          // Scroll to results
+          analysisResults.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+        } catch (err) {
+          console.error("Solver Error:", err);
+          alert("Something went wrong analyzing the board. Please try again.");
+          loadingOverlay.classList.add('hidden');
+        }
+
+      });
+
+    });
+  </script>
 </body>
 
 </html>
