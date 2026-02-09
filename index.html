@@ -349,41 +349,196 @@
       }
 
 
-      // --- IMAGE PROCESSING MOCK ---
+      // --- IMAGE PROCESSING (REAL) ---
       async function analyzeImage(file) {
-        // In a real WASM/Server implementation, we would read pixels here.
-        // For this single-file JS demo, we simulate detection.
         return new Promise(resolve => {
-          setTimeout(() => {
-            // 1. Create a random board
+          const img = new Image();
+          img.onload = () => {
+            const canvas = document.getElementById('cv-canvas');
+            const ctx = canvas.getContext('2d');
+
+            // Resize to standard width to make coordinate math consistent
+            const STANDARD_WIDTH = 500;
+            const scale = STANDARD_WIDTH / img.width;
+            canvas.width = STANDARD_WIDTH;
+            canvas.height = img.height * scale;
+
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+            // 1. Detect Board
+            // Heuristic: Board is usually in the upper half, square-ish, standard padding
+            // We scan for the board area. 
+            // Simplifying Assumption: Board is centered horizontally, width is ~90% of screen
+
+            const boardWidth = canvas.width * 0.92;
+            const boardX = (canvas.width - boardWidth) / 2;
+            // Usually board starts around 20-25% down on mobile screenshots
+            // We can try to find the "start" by looking for the first row of distinct gray/colored cells
+            // For now, hardcode a safe guess or scan vertical center
+            let boardY = canvas.height * 0.22;
+
+            const cellWidth = boardWidth / COLS;
+            const cellHeight = boardWidth / ROWS; // Square cells
+
             const board = createBoard();
-            for (let i = 0; i < ROWS; i++) {
-              for (let j = 0; j < COLS; j++) {
-                // 30% chance of a block being filled
-                if (Math.random() > 0.7) board[i][j] = 1;
+
+            // Scan the grid
+            for (let r = 0; r < ROWS; r++) {
+              for (let c = 0; c < COLS; c++) {
+                // Sample center of the cell
+                const cx = boardX + c * cellWidth + cellWidth / 2;
+                const cy = boardY + r * cellHeight + cellHeight / 2;
+
+                if (isBlockPresent(ctx, cx, cy, cellWidth / 4)) {
+                  board[r][c] = 1;
+                }
               }
             }
 
-            // 2. Generate 3 random pieces
-            const shapesPool = [
-              [[1]], // 1x1
-              [[1, 1]], // 2x1
-              [[1, 1, 1]], // 3x1
-              [[1, 1], [1, 1]], // 2x2
-              [[1, 0], [1, 1]], // Small L
-              [[1, 1, 1], [0, 1, 0]], // T
-              [[1, 1, 1, 1]] // 4x1 I
-            ];
+            // 2. Detect Pieces (Bottom Area)
+            // Split bottom area into 3 zones
+            const pieces = [];
+            const bottomAreaY = boardY + boardWidth + 20; // Just below board
+            const areaHeight = canvas.height - bottomAreaY;
+            const pieceZoneWidth = canvas.width / 3;
 
-            const pieces = [
-              { shape: shapesPool[Math.floor(Math.random() * shapesPool.length)] },
-              { shape: shapesPool[Math.floor(Math.random() * shapesPool.length)] },
-              { shape: shapesPool[Math.floor(Math.random() * shapesPool.length)] }
-            ];
+            for (let i = 0; i < 3; i++) {
+              const zoneX = i * pieceZoneWidth;
+              // Scan a 5x5 grid in this zone
+              // We need to find the "center of mass" of the piece or just scan a virtual 5x5 grid
+              // Let's assume the piece is centered in the zone
+
+              // We construct a shape array
+              // The tricky part is knowing the cell size of the *pieces* (usually smaller than board)
+              // Let's guess piece cell size is ~60% of board cell size
+              const pCellSize = cellWidth * 0.6;
+              const zoneCenterX = zoneX + pieceZoneWidth / 2;
+              const zoneCenterY = bottomAreaY + areaHeight / 2; // Rough center
+
+              // We scan a 5x5 grid relative to the zone center
+              // 5x5 means offsets: -2, -1, 0, 1, 2
+              const shape = Array(5).fill().map(() => Array(5).fill(0));
+              let hasBlock = false;
+
+              for (let pr = -2; pr <= 2; pr++) {
+                for (let pc = -2; pc <= 2; pc++) {
+                  const px = zoneCenterX + pc * pCellSize;
+                  const py = zoneCenterY + pr * pCellSize;
+
+                  if (isBlockPresent(ctx, px, py, pCellSize / 4)) {
+                    shape[pr + 2][pc + 2] = 1;
+                    hasBlock = true;
+                  }
+                }
+              }
+
+              // Normalize Shape: Trim empty rows/cols to minimal bounding box
+              if (hasBlock) {
+                pieces.push({ shape: trimShape(shape) });
+              } else {
+                // Fallback: If detection fails, give a 1x1 block
+                pieces.push({ shape: [[1]] });
+              }
+            }
 
             resolve({ board, pieces });
-          }, 1000); // Fake delay for realism
+          };
+          img.src = URL.createObjectURL(file);
         });
+      }
+
+      function isBlockPresent(ctx, x, y, radius) {
+        // Get pixel data around the point
+        const size = Math.floor(radius * 2);
+        // Safe bounds check
+        if (x < 0 || y < 0 || x >= ctx.canvas.width || y >= ctx.canvas.height) return false;
+
+        try {
+          const imgData = ctx.getImageData(x - radius, y - radius, size, size);
+          const data = imgData.data;
+          let r = 0, g = 0, b = 0;
+          let count = 0;
+
+          for (let i = 0; i < data.length; i += 4) {
+            r += data[i];
+            g += data[i + 1];
+            b += data[i + 2];
+            count++;
+          }
+
+          r = Math.floor(r / count);
+          g = Math.floor(g / count);
+          b = Math.floor(b / count);
+
+          // Check 1: Saturation (Blocks are colorful, empty slots are greyish)
+          const hsl = rgbToHsl(r, g, b);
+          // Background is usually dark blue/grey (low saturation or very dark)
+          // Pieces are bright colors (Orange, Blue, Pink, Green)
+
+          // Tuned Thresholds for Block Blast
+          // Empty slot is usually very dark (L < 0.2) or grey (S < 0.1)
+          // Blocks are usually bright (L > 0.3) AND colorful (S > 0.3)
+
+          // Light Blue blocks need special care. 
+          const isColorful = hsl.s > 0.25;
+          const isBright = hsl.l > 0.25;
+
+          // Specific check for the dark empty slots
+          // Empty slots on some versions are dark blue.
+          // We assume "Empty" is the dominant background color? 
+          // Simple heuristic: If it looks "on", return true.
+
+          return isColorful && isBright;
+        } catch (e) {
+          return false;
+        }
+      }
+
+      function trimShape(shape) {
+        // Find bounds
+        let minR = 5, maxR = -1, minC = 5, maxC = -1;
+        for (let r = 0; r < 5; r++) {
+          for (let c = 0; c < 5; c++) {
+            if (shape[r][c] === 1) {
+              if (r < minR) minR = r;
+              if (r > maxR) maxR = r;
+              if (c < minC) minC = c;
+              if (c > maxC) maxC = c;
+            }
+          }
+        }
+        if (maxR === -1) return [[1]]; // Empty
+
+        const newRows = maxR - minR + 1;
+        const newCols = maxC - minC + 1;
+        const cropped = Array(newRows).fill().map(() => Array(newCols).fill(0));
+
+        for (let r = 0; r < newRows; r++) {
+          for (let c = 0; c < newCols; c++) {
+            cropped[r][c] = shape[minR + r][minC + c];
+          }
+        }
+        return cropped;
+      }
+
+      function rgbToHsl(r, g, b) {
+        r /= 255, g /= 255, b /= 255;
+        const max = Math.max(r, g, b), min = Math.min(r, g, b);
+        let h, s, l = (max + min) / 2;
+
+        if (max == min) {
+          h = s = 0; // achromatic
+        } else {
+          const d = max - min;
+          s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+          switch (max) {
+            case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+            case g: h = (b - r) / d + 2; break;
+            case b: h = (r - g) / d + 4; break;
+          }
+          h /= 6;
+        }
+        return { h, s, l };
       }
 
 
