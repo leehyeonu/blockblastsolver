@@ -506,31 +506,58 @@
               }
             }
 
-            // === STEP 3: PIECE RECOGNITION (CLUSTERING) ===
+            // === STEP 3: PIECE RECOGNITION (AD-SAFE) ===
             const pieces = [];
+
+            // Define Safe Zone for Pieces (Exclude Ad Banner at bottom)
+            // Piece area starts below detection board
             const pieceScanTop = boardBottomY + 10;
-            const pieceScanBot = height - 20;
+            // Limit height to avoid ads. Pieces are rarely larger than 60% of board height.
+            // Using a strict limit: boardBottom + certain pixel amount
+            const pieceScanBot = Math.min(height - 10, pieceScanTop + boardHeight * 0.6);
             const zoneW = width / 3;
 
-            // Determine Background Color (Median of bottom area)
-            // Taking a sample from the bottom center
-            const bgSample = getPixel(width / 2, height - 50);
+            // Draw Scan Limits for Debug
+            ctx.strokeStyle = 'magenta';
+            ctx.beginPath();
+            ctx.moveTo(0, pieceScanTop); ctx.lineTo(width, pieceScanTop);
+            ctx.moveTo(0, pieceScanBot); ctx.lineTo(width, pieceScanBot);
+            ctx.stroke();
+
+            // Correct Background Sampling:
+            // Sample from the "gap" between pieces, which is generally safe.
+            // Avoid sampling the very bottom (ad) or the pieces themselves.
+            // We take a sample from the top-left of the piece zone.
+            let bgR = 0, bgG = 0, bgB = 0;
+            let bgCount = 0;
+
+            // Check a few points in the "gutter" between zones
+            const sampleX = Math.floor(zoneW); // Between 1st and 2nd zone
+            for (let y = pieceScanTop; y < pieceScanTop + 50; y += 10) {
+              const p = getPixel(sampleX, y);
+              bgR += p.r; bgG += p.g; bgB += p.b;
+              bgCount++;
+            }
+            bgR /= bgCount; bgG /= bgCount; bgB /= bgCount;
 
             for (let i = 0; i < 3; i++) {
               const zx = i * zoneW;
 
-              // Identify clusters of non-background pixels
+              // Identify clusters of non-background pixels in this zone
               const points = [];
-              for (let y = pieceScanTop; y < pieceScanBot; y += 3) {
-                for (let x = zx + 10; x < zx + zoneW - 10; x += 3) {
-                  if (isColorPixel(x, y, bgSample.r, bgSample.g, bgSample.b)) {
+              for (let y = pieceScanTop; y < pieceScanBot; y += 2) {
+                for (let x = zx + 5; x < zx + zoneW - 5; x += 2) {
+                  // Stronger contrast check
+                  if (isColorPixel(x, y, bgR, bgG, bgB)) {
                     points.push({ x, y });
                   }
                 }
               }
 
-              if (points.length > 20) {
-                // Find Bounding Box of the cluster
+              // Noise Filter: A piece must have a significant number of pixels
+              // Lower threshold slightly to catch thin pieces
+              if (points.length > 30) {
+                // Find Bounding Box
                 let minX = width, maxX = 0, minY = height, maxY = 0;
                 for (const p of points) {
                   if (p.x < minX) minX = p.x;
@@ -540,36 +567,40 @@
                 }
 
                 // Draw BBox
-                ctx.strokeStyle = 'yellow';
+                ctx.strokeStyle = 'cyan';
                 ctx.strokeRect(minX, minY, maxX - minX, maxY - minY);
 
-                // Fit Grid
-                // Heuristic: A block is roughly cellW * 0.6
-                const pCellS = cellW * 0.6;
-
-                // Center of BBox
+                // Center
                 const cx = (minX + maxX) / 2;
                 const cy = (minY + maxY) / 2;
 
-                // Map 5x5 grid around center
+                // Fit Grid
+                // Heuristic: A block is roughly cellW * 0.55
+                // Pieces are often slightly smaller blocks than board blocks
+                const pCellS = cellW * 0.53;
+
                 const shape = Array(5).fill().map(() => Array(5).fill(0));
                 let hasBlock = false;
 
+                // Scan 5x5 grid relative to center
                 for (let r = -2; r <= 2; r++) {
                   for (let c = -2; c <= 2; c++) {
                     const tx = cx + c * pCellS;
                     const ty = cy + r * pCellS;
 
-                    // Check if this point hits a "color pixel"
-                    // Optimize: check if any point in our `points` array is close to tx, ty
-                    // Or simple verify pixel color again at tx, ty
-                    if (tx > zx && tx < zx + zoneW && ty > pieceScanTop && ty < pieceScanBot) {
-                      if (isColorPixel(tx, ty, bgSample.r, bgSample.g, bgSample.b)) {
-                        shape[r + 2][c + 2] = 1;
-                        hasBlock = true;
-                        ctx.fillStyle = 'blue';
-                        ctx.fillRect(tx - 2, ty - 2, 4, 4);
+                    // To be robust, check a small 3x3 area around grid point
+                    let hitCount = 0;
+                    for (let sy = -1; sy <= 1; sy++) {
+                      for (let sx = -1; sx <= 1; sx++) {
+                        if (isColorPixel(tx + sx, ty + sy, bgR, bgG, bgB)) hitCount++;
                       }
+                    }
+
+                    if (hitCount >= 2) { // 2 out of 9 pixels matched
+                      shape[r + 2][c + 2] = 1;
+                      hasBlock = true;
+                      ctx.fillStyle = 'blue';
+                      ctx.fillRect(tx - 3, ty - 3, 6, 6);
                     }
                   }
                 }
