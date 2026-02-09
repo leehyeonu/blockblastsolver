@@ -378,79 +378,65 @@
               return { r: pixelData[idx], g: pixelData[idx + 1], b: pixelData[idx + 2] };
             }
 
-            // Check if pixel is dark (empty cell background)
-            function isDark(r, g, b) {
-              return r < 55 && g < 55 && b < 55;
-            }
-
-            // Check if pixel is a colorful game block
-            function isColorful(r, g, b) {
+            // Calculate saturation (0-1)
+            function getSaturation(r, g, b) {
               const max = Math.max(r, g, b);
               const min = Math.min(r, g, b);
-              const diff = max - min;
-              if (max < 50) return false;
-              if (diff < 25) return false;
-              const saturation = max === 0 ? 0 : diff / max;
-              return saturation > 0.2 && max > 60;
+              if (max === 0) return 0;
+              return (max - min) / max;
             }
 
-            // Check if pixel looks like it's inside the board (dark or colorful)
-            function isBoardPixel(x, y) {
+            // Check if pixel is a game block (high saturation = colorful)
+            // Works for ANY theme (dark or light)
+            function isBlock(r, g, b) {
+              const max = Math.max(r, g, b);
+              const sat = getSaturation(r, g, b);
+              // Blocks are colorful: high saturation AND not too dark
+              return sat > 0.25 && max > 80;
+            }
+
+            // For board finding: check if pixel looks like board area
+            // Board cells are either blocks OR have different appearance from UI
+            function isBoardArea(x, y) {
               const p = getPixel(x, y);
-              return isDark(p.r, p.g, p.b) || isColorful(p.r, p.g, p.b);
+              const sat = getSaturation(p.r, p.g, p.b);
+              const brightness = Math.max(p.r, p.g, p.b);
+              // Either it's a block (high saturation) OR it's darker than typical UI background
+              return sat > 0.2 || brightness < 120;
             }
 
-            // === STEP 1: FIND THE BOARD RECTANGLE ===
-            // The board is ALWAYS a square 8x8 grid. Key insight: width = height.
 
+            // === STEP 1: FIND THE BOARD ===
+            // Strategy: Use fixed percentage-based positioning (works across screen sizes)
+            // The board is typically ~88% of screen width, centered, starting around 12-15% from top
+
+            const boardWidthRatio = 0.88;
+            const boardWidth = canvas.width * boardWidthRatio;
+            const boardX = (canvas.width - boardWidth) / 2;
+            const cellWidth = boardWidth / COLS;
+            const cellHeight = cellWidth; // Square cells
+            const boardHeight = cellHeight * ROWS;
+
+            // Find board Y by checking where blocks/cells appear
+            let boardY = -1;
             const midX = Math.floor(canvas.width / 2);
 
-            // Find TOP edge
-            let boardTop = -1;
-            for (let y = 50; y < canvas.height * 0.4; y++) {
-              // Check multiple x positions to be sure
-              let darkCount = 0;
-              for (let dx = -50; dx <= 50; dx += 25) {
-                if (isBoardPixel(midX + dx, y)) darkCount++;
+            for (let testY = 50; testY < canvas.height * 0.35; testY += 2) {
+              let matchCount = 0;
+              // Check 8 columns
+              for (let c = 0; c < COLS; c++) {
+                const testX = boardX + c * cellWidth + cellWidth / 2;
+                if (isBoardArea(testX, testY)) matchCount++;
               }
-              if (darkCount >= 3) {
-                boardTop = y;
+              if (matchCount >= 5) {
+                boardY = testY;
                 break;
               }
             }
-            if (boardTop === -1) boardTop = Math.floor(canvas.height * 0.15);
 
-            // Find LEFT edge: scan from left toward center at boardTop + 100
-            let boardLeft = -1;
-            const scanY = boardTop + 50;
-            for (let x = 10; x < canvas.width * 0.3; x++) {
-              if (isBoardPixel(x, scanY)) {
-                boardLeft = x;
-                break;
-              }
-            }
-            if (boardLeft === -1) boardLeft = Math.floor(canvas.width * 0.04);
+            if (boardY === -1) boardY = Math.floor(canvas.height * 0.12);
 
-            // Find RIGHT edge: scan from right toward center
-            let boardRight = -1;
-            for (let x = canvas.width - 10; x > canvas.width * 0.7; x--) {
-              if (isBoardPixel(x, scanY)) {
-                boardRight = x;
-                break;
-              }
-            }
-            if (boardRight === -1) boardRight = Math.floor(canvas.width * 0.96);
-
-            // Calculate dimensions - BOARD IS SQUARE
-            const boardWidth = boardRight - boardLeft;
-            const boardHeight = boardWidth; // Square board!
-            const boardX = boardLeft;
-            const boardY = boardTop;
-            const boardBottom = boardTop + boardHeight;
-
-            // Cell dimensions
-            const cellWidth = boardWidth / COLS;
-            const cellHeight = boardHeight / ROWS;
+            const boardBottom = boardY + boardHeight;
 
             // === DEBUG: Draw board boundary ===
             ctx.strokeStyle = 'rgba(255, 0, 0, 0.9)';
@@ -493,7 +479,7 @@
 
                 let colorfulCount = 0;
                 for (const p of samples) {
-                  if (isColorful(p.r, p.g, p.b)) colorfulCount++;
+                  if (isBlock(p.r, p.g, p.b)) colorfulCount++;
                 }
 
                 if (colorfulCount >= 2) {
@@ -526,7 +512,7 @@
               let pieceTopY = -1;
               for (let scanY = piecesStartY + 5; scanY < piecesEndY; scanY += 3) {
                 const p = getPixel(zoneCenterX, scanY);
-                if (isColorful(p.r, p.g, p.b)) {
+                if (isBlock(p.r, p.g, p.b)) {
                   pieceTopY = scanY;
                   break;
                 }
@@ -552,7 +538,7 @@
                   if (py > piecesEndY) continue; // Don't scan into ad area
 
                   const p = getPixel(px, py);
-                  if (isColorful(p.r, p.g, p.b)) {
+                  if (isBlock(p.r, p.g, p.b)) {
                     shape[pr + 2][pc + 2] = 1;
                     hasBlock = true;
                     ctx.fillStyle = 'rgba(0, 100, 255, 0.5)';
