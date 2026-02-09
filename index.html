@@ -350,7 +350,7 @@
       }
 
 
-      // --- IMAGE PROCESSING (REAL + DEBUG) ---
+      // --- IMAGE PROCESSING (IMPROVED ACCURACY) ---
       async function analyzeImage(file) {
         return new Promise(resolve => {
           const img = new Image();
@@ -358,7 +358,6 @@
             const canvas = document.getElementById('cv-canvas');
             const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
-            // Standardize width for consistent processing
             const STANDARD_WIDTH = 500;
             const scale = STANDARD_WIDTH / img.width;
             canvas.width = STANDARD_WIDTH;
@@ -366,7 +365,6 @@
 
             ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
-            // Get image data ONCE
             const fullImgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
             const pixelData = fullImgData.data;
 
@@ -378,73 +376,83 @@
               return { r: pixelData[idx], g: pixelData[idx + 1], b: pixelData[idx + 2] };
             }
 
-            // Calculate saturation (0-1)
-            function getSaturation(r, g, b) {
-              const max = Math.max(r, g, b);
-              const min = Math.min(r, g, b);
-              if (max === 0) return 0;
-              return (max - min) / max;
+            // Get average color in a small area
+            function getAverageColor(x, y, radius) {
+              let r = 0, g = 0, b = 0, count = 0;
+              for (let dy = -radius; dy <= radius; dy++) {
+                for (let dx = -radius; dx <= radius; dx++) {
+                  const p = getPixel(x + dx, y + dy);
+                  r += p.r; g += p.g; b += p.b; count++;
+                }
+              }
+              return { r: r / count, g: g / count, b: b / count };
             }
 
-            // Check if pixel is a game block (high saturation = colorful)
-            // Works for ANY theme (dark or light)
+            // Check if pixel is a game block (IMPROVED)
             function isBlock(r, g, b) {
               const max = Math.max(r, g, b);
-              const sat = getSaturation(r, g, b);
-              // Blocks are colorful: high saturation AND not too dark
-              return sat > 0.25 && max > 80;
+              const min = Math.min(r, g, b);
+              const diff = max - min;
+
+              // Too dark = empty cell in dark theme
+              if (max < 50) return false;
+
+              // High saturation means colorful block
+              const sat = max === 0 ? 0 : diff / max;
+              if (sat > 0.20 && max > 70) return true;
+
+              // Also check for high brightness with some color variation
+              // This catches lighter colored blocks
+              if (diff > 30 && max > 100) return true;
+
+              return false;
             }
 
-            // For board finding: check if pixel looks like board area
-            // Board cells are either blocks OR have different appearance from UI
-            function isBoardArea(x, y) {
-              const p = getPixel(x, y);
-              const sat = getSaturation(p.r, p.g, p.b);
-              const brightness = Math.max(p.r, p.g, p.b);
-              // Either it's a block (high saturation) OR it's darker than typical UI background
-              return sat > 0.2 || brightness < 120;
-            }
-
-
-            // === STEP 1: FIND THE BOARD ===
-            // Strategy: Use fixed percentage-based positioning (works across screen sizes)
-            // The board is typically ~88% of screen width, centered, starting around 12-15% from top
+            // === STEP 1: FIND BOARD POSITION ===
+            // The score text is always above the board. Find it, then board is below.
+            // Board takes ~88% width, centered
 
             const boardWidthRatio = 0.88;
             const boardWidth = canvas.width * boardWidthRatio;
             const boardX = (canvas.width - boardWidth) / 2;
             const cellWidth = boardWidth / COLS;
-            const cellHeight = cellWidth; // Square cells
+            const cellHeight = cellWidth;
             const boardHeight = cellHeight * ROWS;
 
-            // Find board Y by checking where blocks/cells appear
-            let boardY = -1;
-            const midX = Math.floor(canvas.width / 2);
+            // Find where the dark/colored board area starts
+            // Scan from top, look for consistent row of similar color (board background or blocks)
+            let boardY = Math.floor(canvas.height * 0.12); // Default
 
-            for (let testY = 50; testY < canvas.height * 0.35; testY += 2) {
-              let matchCount = 0;
-              // Check 8 columns
+            // Method: find first row where we detect blocks or dark cells
+            const midX = canvas.width / 2;
+            for (let y = 60; y < canvas.height * 0.25; y++) {
+              // Check if this row looks like board (either has blocks or is dark)
+              let boardLikeCount = 0;
               for (let c = 0; c < COLS; c++) {
-                const testX = boardX + c * cellWidth + cellWidth / 2;
-                if (isBoardArea(testX, testY)) matchCount++;
+                const x = boardX + c * cellWidth + cellWidth / 2;
+                const avg = getAverageColor(x, y, 3);
+
+                // Check if it's a block OR dark empty cell
+                const isDark = avg.r < 60 && avg.g < 60 && avg.b < 60;
+                const isBlockCell = isBlock(avg.r, avg.g, avg.b);
+
+                if (isDark || isBlockCell) boardLikeCount++;
               }
-              if (matchCount >= 5) {
-                boardY = testY;
+
+              if (boardLikeCount >= 4) {
+                boardY = y;
                 break;
               }
             }
 
-            if (boardY === -1) boardY = Math.floor(canvas.height * 0.12);
-
             const boardBottom = boardY + boardHeight;
 
-            // === DEBUG: Draw board boundary ===
+            // === DEBUG VISUALIZATION ===
             ctx.strokeStyle = 'rgba(255, 0, 0, 0.9)';
             ctx.lineWidth = 3;
             ctx.strokeRect(boardX, boardY, boardWidth, boardHeight);
 
-            // Draw grid
-            ctx.strokeStyle = 'rgba(255, 255, 0, 0.5)';
+            ctx.strokeStyle = 'rgba(255, 255, 0, 0.4)';
             ctx.lineWidth = 1;
             for (let r = 0; r <= ROWS; r++) {
               ctx.beginPath();
@@ -459,7 +467,7 @@
               ctx.stroke();
             }
 
-            // === STEP 2: DETECT BLOCKS IN EACH CELL ===
+            // === STEP 2: DETECT BOARD BLOCKS ===
             const board = createBoard();
 
             for (let r = 0; r < ROWS; r++) {
@@ -467,36 +475,37 @@
                 const cx = boardX + c * cellWidth + cellWidth / 2;
                 const cy = boardY + r * cellHeight + cellHeight / 2;
 
-                // Multi-point sampling
-                const sampleR = cellWidth * 0.25;
-                const samples = [
-                  getPixel(cx, cy),
-                  getPixel(cx - sampleR, cy - sampleR),
-                  getPixel(cx + sampleR, cy - sampleR),
-                  getPixel(cx - sampleR, cy + sampleR),
-                  getPixel(cx + sampleR, cy + sampleR)
+                // Sample center and nearby points
+                const rad = cellWidth * 0.25;
+                let blockVotes = 0;
+
+                const testPoints = [
+                  [cx, cy],
+                  [cx - rad, cy],
+                  [cx + rad, cy],
+                  [cx, cy - rad],
+                  [cx, cy + rad]
                 ];
 
-                let colorfulCount = 0;
-                for (const p of samples) {
-                  if (isBlock(p.r, p.g, p.b)) colorfulCount++;
+                for (const [tx, ty] of testPoints) {
+                  const avg = getAverageColor(tx, ty, 2);
+                  if (isBlock(avg.r, avg.g, avg.b)) blockVotes++;
                 }
 
-                if (colorfulCount >= 2) {
+                if (blockVotes >= 2) {
                   board[r][c] = 1;
-                  ctx.fillStyle = 'rgba(0, 255, 0, 0.4)';
+                  ctx.fillStyle = 'rgba(0, 255, 0, 0.35)';
                   ctx.fillRect(boardX + c * cellWidth + 2, boardY + r * cellHeight + 2, cellWidth - 4, cellHeight - 4);
                 }
               }
             }
 
-            // === STEP 3: DETECT PIECES ===
+            // === STEP 3: DETECT PIECES (IMPROVED) ===
             const pieces = [];
-            const piecesStartY = boardBottom + 10;
-            const piecesEndY = canvas.height - 50; // Stop before ad area
+            const piecesStartY = boardBottom + 5;
+            const piecesEndY = canvas.height - 35;
             const pieceZoneWidth = canvas.width / 3;
 
-            // Debug separator line
             ctx.strokeStyle = 'rgba(0, 100, 255, 0.9)';
             ctx.lineWidth = 2;
             ctx.beginPath();
@@ -508,41 +517,51 @@
               const zoneX = i * pieceZoneWidth;
               const zoneCenterX = zoneX + pieceZoneWidth / 2;
 
-              // Find the first colorful pixel in this zone (top of piece)
-              let pieceTopY = -1;
-              for (let scanY = piecesStartY + 5; scanY < piecesEndY; scanY += 3) {
-                const p = getPixel(zoneCenterX, scanY);
-                if (isBlock(p.r, p.g, p.b)) {
-                  pieceTopY = scanY;
-                  break;
+              // IMPROVED: Scan entire zone for block pixels, not just center line
+              let minPieceY = Infinity, maxPieceY = -1;
+              let minPieceX = Infinity, maxPieceX = -1;
+
+              // Scan the zone for blocks
+              for (let sy = piecesStartY + 5; sy < piecesEndY; sy += 4) {
+                for (let sx = zoneX + 10; sx < zoneX + pieceZoneWidth - 10; sx += 4) {
+                  const avg = getAverageColor(sx, sy, 2);
+                  if (isBlock(avg.r, avg.g, avg.b)) {
+                    if (sy < minPieceY) minPieceY = sy;
+                    if (sy > maxPieceY) maxPieceY = sy;
+                    if (sx < minPieceX) minPieceX = sx;
+                    if (sx > maxPieceX) maxPieceX = sx;
+                  }
                 }
               }
 
-              // Debug zone box
               ctx.strokeStyle = 'rgba(0, 0, 255, 0.3)';
               ctx.strokeRect(zoneX + 2, piecesStartY + 2, pieceZoneWidth - 4, piecesEndY - piecesStartY - 4);
 
-              // Use smaller cell size for pieces (they're visually smaller)
-              const pCellSize = cellWidth * 0.65;
+              // Calculate piece dimensions based on found bounds
               const shape = Array(5).fill().map(() => Array(5).fill(0));
               let hasBlock = false;
 
-              // Anchor Y: if we found piece top, use it; else estimate
-              const anchorY = pieceTopY > 0 ? pieceTopY + pCellSize * 0.5 : piecesStartY + 40;
+              if (minPieceY < Infinity) {
+                // Found piece bounds, now sample on a grid
+                const pieceCenterX = (minPieceX + maxPieceX) / 2;
+                const pieceCenterY = (minPieceY + maxPieceY) / 2;
+                const pCellSize = cellWidth * 0.50;
 
-              for (let pr = -2; pr <= 2; pr++) {
-                for (let pc = -2; pc <= 2; pc++) {
-                  const px = zoneCenterX + pc * pCellSize;
-                  const py = anchorY + pr * pCellSize;
+                for (let pr = -2; pr <= 2; pr++) {
+                  for (let pc = -2; pc <= 2; pc++) {
+                    const px = pieceCenterX + pc * pCellSize;
+                    const py = pieceCenterY + pr * pCellSize;
 
-                  if (py > piecesEndY) continue; // Don't scan into ad area
+                    if (py > piecesEndY || py < piecesStartY) continue;
+                    if (px < zoneX + 5 || px > zoneX + pieceZoneWidth - 5) continue;
 
-                  const p = getPixel(px, py);
-                  if (isBlock(p.r, p.g, p.b)) {
-                    shape[pr + 2][pc + 2] = 1;
-                    hasBlock = true;
-                    ctx.fillStyle = 'rgba(0, 100, 255, 0.5)';
-                    ctx.fillRect(px - pCellSize / 2 + 1, py - pCellSize / 2 + 1, pCellSize - 2, pCellSize - 2);
+                    const avg = getAverageColor(px, py, 3);
+                    if (isBlock(avg.r, avg.g, avg.b)) {
+                      shape[pr + 2][pc + 2] = 1;
+                      hasBlock = true;
+                      ctx.fillStyle = 'rgba(0, 100, 255, 0.5)';
+                      ctx.fillRect(px - pCellSize / 2 + 1, py - pCellSize / 2 + 1, pCellSize - 2, pCellSize - 2);
+                    }
                   }
                 }
               }
@@ -554,7 +573,6 @@
               }
             }
 
-            // Update preview
             const previewImg = document.getElementById('preview-img');
             previewImg.src = canvas.toDataURL();
 
@@ -601,14 +619,19 @@
 
       function drawGrid(containerEl, boardData, rows = 8, cols = 8) {
         containerEl.innerHTML = '';
-        // Ensure grid style
         containerEl.style.display = 'grid';
-        containerEl.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
+        containerEl.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+        containerEl.style.width = '280px';
+        containerEl.style.height = '280px';
+        containerEl.style.gap = '3px';
 
         for (let r = 0; r < rows; r++) {
           for (let c = 0; c < cols; c++) {
             const isFilled = boardData[r][c] === 1;
-            renderCell(containerEl, isFilled);
+            const div = document.createElement('div');
+            div.className = `rounded-sm ${isFilled ? 'bg-indigo-500 shadow-sm' : 'bg-gray-200/50'}`;
+            div.style.aspectRatio = '1';
+            containerEl.appendChild(div);
           }
         }
       }
@@ -617,16 +640,18 @@
         const pRows = shape.length;
         const pCols = shape[0].length;
         containerEl.innerHTML = '';
-        containerEl.className = `grid gap-1`;
+        containerEl.style.display = 'grid';
         containerEl.style.gridTemplateColumns = `repeat(${pCols}, 1fr)`;
-        containerEl.style.width = `${pCols * 20}px`; // Approximate sizing
+        containerEl.style.width = `${pCols * 24}px`;
+        containerEl.style.gap = '2px';
 
         for (let r = 0; r < pRows; r++) {
           for (let c = 0; c < pCols; c++) {
             const isFilled = shape[r][c] === 1;
-            // For pieces, empty spots should be invisible
             const div = document.createElement('div');
-            div.className = `w-4 h-4 rounded-sm ${isFilled ? 'bg-indigo-500' : 'bg-transparent'}`;
+            div.style.width = '20px';
+            div.style.height = '20px';
+            div.className = `rounded-sm ${isFilled ? 'bg-indigo-500 shadow-sm' : 'bg-transparent'}`;
             containerEl.appendChild(div);
           }
         }
